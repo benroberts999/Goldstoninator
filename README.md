@@ -101,7 +101,7 @@ gd.grid(["t_na g_wavn", "g_wnva t_an"]).equation()
 ### Styles
 
 `styles={'S': 'dotted', 't': 'cross'}` on `diagram` or `grid`, or `gd.STYLES['t'] = 'cross'` for the whole session.
-Two-body lines: `wavy` (default for `g`), `dashed` (default for other names), `dotted`, `double`, `solid`.
+Two-body lines: `wavy` (default for `g`), `doublewavy` (default for `X`; `double-wavy` is read the same), `dashed` (default for other names), `dotted`, `double`, `solid`.
 One-body markers: `x` or `cross` (default), `dot`, `circle`, `square`.
 `pad=` adds margin around the picture, `labels=False` leaves the orbital labels off it; the energy symbols are `gd.EPS` and `gd.OMEGA`.
 
@@ -125,6 +125,7 @@ A factor is `name(label)` or `name(label,label)`; the labels name the vertices, 
 * `G(1,2)`: internal line (Green's function), solid, no arrow. `G(1,1)` is a closed loop (tadpole).
 * `Gex(1,2)`: the excited part of `G`, a line with two arrowheads; `Pa(1,2)`: the core projector, a double line. Both are fermion lines for the layout (the straight line, the loops), like `G`.
 * `Q(1,2)`: Coulomb line, wavy, drawn as a gentle arc; `Qs(1,2)` is a straight one (`curved=False` straightens them all). `Qu(1,2)` and `Qd(1,2)` bend up or down (left or right for a vertical line) when the automatic side is not what you want. Its ends need not touch anything else: `Q(1,2) T(2)` is a line to an external potential.
+* `X(1,2)`: a second Coulomb-type line, double wavy (a screened or effective interaction, say), laid out like `Q`; `Xs`, `Xu` and `Xd` as for `Q`.
 * `PI(1,2)` (also `Pi`, `\Pi`): polarisation loop, `G(1,2) G(2,1)`, drawn as two arcs that never overlap.
 * `v(1)`, `w(2)` (names `v w x y`): external lines, with arrows. The first one written enters at the top left, the second leaves at the right; at most one of each.
 * Any other name with one label, `T(1)`, is a marker at that vertex (a cross by default); with two labels, `S(1,2)`, a dashed line. `styles={'T': 'dot', 'S': 'dotted', 'G': 'double'}` changes them, as for Goldstone diagrams. Two more line styles exist here: `arrow` and `arrows`, a solid line with one filled or two open arrowheads at its middle, pointing from the first label to the second.

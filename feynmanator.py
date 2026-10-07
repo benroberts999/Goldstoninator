@@ -20,13 +20,15 @@ vertex, any label will do.  The factors are
     Qs(1,2)      a Coulomb line drawn straight
     Qu(1,2), Qd(1,2)  a Coulomb line bent upwards or downwards (left or right when it is vertical),
                  for when the side chosen automatically is not the one wanted
+    X(1,2)       a second Coulomb-type line, double wavy (a screened or effective interaction): laid out
+                 like Q, with the same variants Xs, Xu, Xd
     PI(1,2)      polarisation loop = G(1,2) G(2,1): two solid arcs (a bubble); also Pi, \\Pi
     v(1), w(2)   external lines (names v w x y): solid with an arrow.  The first one written comes in
                  at the top left, the second goes out at the right; at most one of each
     T(1)         any other name with one label: a marker at that vertex (a cross; styles={'T': 'dot'})
     S(1,2)       any other name with two labels: a dashed line (styles={'S': 'dotted'})
-Nothing is drawn at a plain vertex and there are no labels.  Line styles: wavy, dashed, dotted, double,
-solid, arrow and arrows (solid with one filled or two open arrowheads at the middle, pointing from the first label to
+Nothing is drawn at a plain vertex and there are no labels.  Line styles: wavy, doublewavy, dashed, dotted,
+double, solid, arrow and arrows (solid with one filled or two open arrowheads at the middle, pointing from the first label to
 the second; styles={'G': 'double'} for dressed propagators); markers: x (= cross), dot, circle, square.
 
 Layout: the vertices go on a small grid, with the incoming vertex at the top left, the outgoing one rightmost
@@ -50,21 +52,18 @@ import goldstoninator as gd
 EXT = "vwxy"  # names of the external lines
 GREEN = "G"  # the internal (fermion) line
 FERMIONS = (GREEN, "Gex", "Pa")  # names laid out as fermion lines: G, its excited part, the core projector
-COULOMB = "Q"  # the Coulomb line
-COULOMB_STRAIGHT = "Qs"  # a Coulomb line drawn straight
-COULOMB_UP = "Qu"  # a Coulomb line bent upwards (to the left when it is vertical)
-COULOMB_DOWN = "Qd"  # ... downwards (to the right)
-COULOMBS = (COULOMB, COULOMB_STRAIGHT, COULOMB_UP, COULOMB_DOWN)
+COULOMB = {"Q": "wavy", "X": "doublewavy"}  # the Coulomb-type lines, name -> style: Q the Coulomb line, X a second one
+COULOMB_STRAIGHT = tuple(n + "s" for n in COULOMB)  # Qs, Xs: a Coulomb line drawn straight
+COULOMB_UP = tuple(n + "u" for n in COULOMB)  # Qu, Xu: bent upwards (to the left when it is vertical)
+COULOMB_DOWN = tuple(n + "d" for n in COULOMB)  # Qd, Xd: ... downwards (to the right)
+COULOMBS = tuple(COULOMB) + COULOMB_STRAIGHT + COULOMB_UP + COULOMB_DOWN
 ARROWS = {"arrow": 1, "arrows": 2}  # line styles drawn solid with one filled or two open arrowheads at the middle
 POLAR = ("PI", "Pi", "\\Pi")  # names of the polarisation loop
 STYLES = {
     GREEN: "solid",
     "Gex": "arrows",
     "Pa": "double",
-    COULOMB: "wavy",
-    COULOMB_STRAIGHT: "wavy",
-    COULOMB_UP: "wavy",
-    COULOMB_DOWN: "wavy",
+    **{n + sfx: st for n, st in COULOMB.items() for sfx in ("", "s", "u", "d")},
 }  # name -> line style (two labels) or marker (one label)
 
 _F_RE = re.compile(
@@ -105,7 +104,7 @@ class Diagram(gd.Picture):
         self.factors = parse_term(term)
         self.vertical = set(vertical)  # names of lines that must run vertically
         self.styles = dict(STYLES)
-        self.styles.update(styles or {})
+        self.styles.update(gd.canon_styles(styles))
         self.pad = pad
         self.vertices, self.edges, self.markers, self.ext = [], [], {}, []
         for name, *labels in self.factors:
@@ -201,11 +200,11 @@ class Diagram(gd.Picture):
             h = min(max(0.8 * gd._dist(a, b), 0.7), 1.2)
             for (name, u, v, st), k in zip(members, levels):
                 dirn = (P(u), P(v))
-                forced = name in (COULOMB_UP, COULOMB_DOWN)  # the side is prescribed
+                forced = name in COULOMB_UP + COULOMB_DOWN  # the side is prescribed
                 up = _side(
                     n, (0.0, 0.0)
                 )  # the sign that bulges upwards (left when vertical)
-                side = (up if name == COULOMB_UP else -up) if forced else far
+                side = (up if name in COULOMB_UP else -up) if forced else far
                 if k != 0:
                     c, poly = _arc(
                         a, b, mid, n, side * abs(k) * h if forced else far * k * h
@@ -250,7 +249,7 @@ class Diagram(gd.Picture):
                         )
                     )
                 elif m == 1 and (
-                    forced or (name == COULOMB and self.curved)
+                    forced or (name in COULOMB and self.curved)
                 ):  # photons bow outwards
                     c, poly = _arc(
                         a, b, mid, n, side * min(max(0.4 * gd._dist(a, b), 0.35), 0.7)

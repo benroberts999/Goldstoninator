@@ -53,7 +53,8 @@ No dependencies beyond the standard library.
 
 Letter classes (override with core='abcd', val='v', exc='...' or types=dict(a='core', ...)):
     core (holes) a b c d e f;  valence v w x y;  every other letter is excited (a particle)
-Line styles for two-body names: wavy (default for g), dashed (default otherwise), dotted, double, solid.
+Line styles for two-body names: wavy (default for g), doublewavy (default for X), dashed (default
+otherwise), dotted, double, solid; 'double-wavy' and 'double wavy' are read as doublewavy.
 Markers for one-body names: x (default; 'cross' is the same), dot, circle, square.
 Energy symbols in tex(): EPS (orbital energies) and OMEGA (absorbed energies, subscripted by the name).
 
@@ -69,9 +70,10 @@ import re
 CORE = "abcdef"
 EXC = "mnrspqtu"
 VAL = "vwxy"
-STYLES = {"g": "wavy"}  # interaction name -> line style (two-body) or marker (one-body)
+STYLES = {"g": "wavy", "X": "doublewavy"}  # interaction name -> line style (two-body) or marker (one-body)
 DEFAULT_STYLE = "dashed"
 DEFAULT_MARKER = "x"
+DOUBLE = 0.045  # half the distance between the two strokes of a double or doublewavy line
 EPS = r"\varepsilon"  # orbital-energy symbol in tex()
 OMEGA = r"\omega"  # symbol of the energy absorbed at a vertex, subscripted by the vertex name
 TIKZ_PREAMBLE = "\\documentclass[tikz,border=2pt]{standalone}\n\\usetikzlibrary{decorations.pathmorphing}\n"
@@ -147,7 +149,7 @@ def _types(types=None, core=CORE, exc=EXC, val=VAL):
 # ----------------------------------------------------------------------------------------------
 class Picture:
     """A drawing built from the primitives of self._geometry(), a dict (diagram units, y up):
-        int      [(a, b, style)]     straight line a -- b; style wavy, dashed, dotted, double or solid
+        int      [(a, b, style)]     straight line a -- b; style wavy, doublewavy, dashed, dotted, double or solid
         bubble   [(a, c, b, style)]  quadratic Bezier arc a -- b with control point c
         loop     [(c, r, style)]     circle of radius r about c
         arc      [(c, r, t0, t1, style)]  circular arc about c, counterclockwise from angle t0 to t1
@@ -182,16 +184,20 @@ class Picture:
             lambda a, b, extra="": '<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="black" stroke-width="1.2"%s/>'
             % (T(a) + T(b) + (extra,))
         )
+        poly = (
+            lambda pts: '<polyline fill="none" stroke="black" stroke-width="1.2" points="%s"/>'
+            % " ".join("%.1f,%.1f" % T(p) for p in pts)
+        )
         el = []
         for a, b, style in g["int"]:
             if style == "wavy":
-                el.append(
-                    '<polyline fill="none" stroke="black" stroke-width="1.2" points="%s"/>'
-                    % " ".join("%.1f,%.1f" % T(p) for p in _wave(a, b))
-                )
+                el.append(poly(_wave(a, b)))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wave(a, b, shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
-                    el.append(line(*_offset(a, b, 0.045 * sgn)))
+                    el.append(line(*_offset(a, b, DOUBLE * sgn)))
             else:
                 el.append(line(a, b, _SVG_DASH.get(style, "")))
         for p, style in g["marker"]:
@@ -219,16 +225,15 @@ class Picture:
                 )
         for a, b in g["straight"]:
             el.append(line(a, b))
-        poly = (
-            lambda pts: '<polyline fill="none" stroke="black" stroke-width="1.2" points="%s"/>'
-            % " ".join("%.1f,%.1f" % T(p) for p in pts)
-        )
         for a, c, b, style in g["bubble"]:
             if style == "wavy":
                 el.append(poly(_wavy(*_bezier(a, c, b))))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wavy(*_bezier(a, c, b), shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
-                    el.append(poly(_offset_pts(*_bezier(a, c, b), 0.045 * sgn)))
+                    el.append(poly(_offset_pts(*_bezier(a, c, b), DOUBLE * sgn)))
             else:
                 el.append(
                     '<path d="M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f" fill="none" stroke="black" stroke-width="1.2"%s/>'
@@ -237,11 +242,14 @@ class Picture:
         for c, r, style in g["loop"]:
             if style == "wavy":
                 el.append(poly(_wavy(*_circle(c, r))))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wavy(*_circle(c, r), shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
                     el.append(
                         '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="black" stroke-width="1.2"/>'
-                        % (T(c) + ((r + 0.045 * sgn) * scale,))
+                        % (T(c) + ((r + DOUBLE * sgn) * scale,))
                     )
             else:
                 el.append(
@@ -252,9 +260,12 @@ class Picture:
             pts, tans = _carc(c, r, t0, t1)
             if style == "wavy":
                 el.append(poly(_wavy(pts, tans)))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wavy(pts, tans, shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
-                    el.append(poly(_offset_pts(pts, tans, 0.045 * sgn)))
+                    el.append(poly(_offset_pts(pts, tans, DOUBLE * sgn)))
             else:
                 el.append(
                     '<polyline fill="none" stroke="black" stroke-width="1.2"%s points="%s"/>'
@@ -307,13 +318,13 @@ class Picture:
         )
         for a, b, style in g["int"]:
             if style == "wavy":
-                pts = _wave(a, b)
-                el.append(
-                    "%s m %s S" % (f(pts[0]), " ".join(f(p) + " l" for p in pts[1:]))
-                )
+                el.append(poly(_wave(a, b)))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wave(a, b, shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
-                    a2, b2 = _offset(a, b, 0.045 * sgn)
+                    a2, b2 = _offset(a, b, DOUBLE * sgn)
                     el.append("%s m %s l S" % (f(a2), f(b2)))
             else:
                 el.append(dashed("%s m %s l S" % (f(a), f(b)), style))
@@ -336,9 +347,12 @@ class Picture:
         for a, c, b, style in g["bubble"]:  # quadratic -> cubic Bezier
             if style == "wavy":
                 el.append(poly(_wavy(*_bezier(a, c, b))))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wavy(*_bezier(a, c, b), shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
-                    el.append(poly(_offset_pts(*_bezier(a, c, b), 0.045 * sgn)))
+                    el.append(poly(_offset_pts(*_bezier(a, c, b), DOUBLE * sgn)))
             else:
                 c1 = (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1]))
                 c2 = (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1]))
@@ -348,18 +362,24 @@ class Picture:
         for c, r, style in g["loop"]:
             if style == "wavy":
                 el.append(poly(_wavy(*_circle(c, r))))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wavy(*_circle(c, r), shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
-                    el.append(_pdf_circle(*T(c), (r + 0.045 * sgn) * scale) + " S")
+                    el.append(_pdf_circle(*T(c), (r + DOUBLE * sgn) * scale) + " S")
             else:
                 el.append(dashed(_pdf_circle(*T(c), r * scale) + " S", style))
         for c, r, t0, t1, style in g.get("arc", []):
             pts, tans = _carc(c, r, t0, t1)
             if style == "wavy":
                 el.append(poly(_wavy(pts, tans)))
+            elif style == "doublewavy":
+                for sgn in (1, -1):
+                    el.append(poly(_wavy(pts, tans, shift=DOUBLE * sgn)))
             elif style == "double":
                 for sgn in (1, -1):
-                    el.append(poly(_offset_pts(pts, tans, 0.045 * sgn)))
+                    el.append(poly(_offset_pts(pts, tans, DOUBLE * sgn)))
             else:
                 el.append(dashed(poly(pts), style))
         for p, d in g["arrows"]:
@@ -497,7 +517,7 @@ class Diagram(Picture):
     ):
         self.names, self.gs = parse_term(term)
         self.styles = dict(STYLES)
-        self.styles.update(styles or {})
+        self.styles.update(canon_styles(styles))
         self.pad = pad
         self.omega = omega
         self.labels = labels
@@ -1306,14 +1326,27 @@ _PDF_DASH = {"dashed": "[6 4] 0 d", "dotted": "[0.1 3.5] 0 d 1 J"}
 
 def _tikz_opt(style, unit):
     """the TikZ options of a line style: '[...]' or ''"""
+    snake = "decorate,decoration={snake,amplitude=%smm,segment length=%smm}" % (
+        _num(0.7 * unit),
+        _num(2.5 * unit),
+    )
+    double = "double,double distance=%spt" % _num(1.8 * unit)
     opt = {
-        "wavy": "decorate,decoration={snake,amplitude=%smm,segment length=%smm}"
-        % (_num(0.7 * unit), _num(2.5 * unit)),
+        "wavy": snake,
+        "doublewavy": double + "," + snake,
         "dashed": "dashed",
         "dotted": "dotted",
-        "double": "double,double distance=%spt" % _num(1.8 * unit),
+        "double": double,
     }.get(style, "")
     return "[%s]" % opt if opt else ""
+
+
+def canon_styles(styles):
+    """a styles dict as given by the user, with 'double-wavy', 'double wavy', 'Wavy' -> 'doublewavy', 'wavy'"""
+    return {
+        k: v.replace("-", "").replace(" ", "").lower() if isinstance(v, str) else v
+        for k, v in (styles or {}).items()
+    }
 
 
 def _bezier(a, c, b, npts=120):
@@ -1357,14 +1390,15 @@ def _carc(c, r, t0, t1, npts=None):
     return pts, tans
 
 
-def _wavy(pts, tans, amp=0.07, wavelength=0.25):
-    """a wavy line along a curve: sinusoid in the arc length, displaced along the normal"""
+def _wavy(pts, tans, amp=0.07, wavelength=0.25, shift=0.0):
+    """a wavy line along a curve: sinusoid in the arc length, displaced along the normal (by shift
+    on top, for the two strokes of a double wavy line)"""
     k = 2 * math.pi / wavelength
     out, s = [], 0.0
     for i, (p, d) in enumerate(zip(pts, tans)):
         if i:
             s += _dist(pts[i - 1], p)
-        h = amp * math.sin(k * s)
+        h = shift + amp * math.sin(k * s)
         out.append((p[0] - d[1] * h, p[1] + d[0] * h))
     return out
 
@@ -1374,15 +1408,16 @@ def _offset_pts(pts, tans, h):
     return [(p[0] - d[1] * h, p[1] + d[0] * h) for p, d in zip(pts, tans)]
 
 
-def _wave(a, b, amp=0.07, wavelength=0.25, npts=120):
+def _wave(a, b, amp=0.07, wavelength=0.25, npts=120, shift=0.0):
+    """a wavy straight line a -- b, displaced by shift along its normal"""
     L = _dist(a, b)
     d = _unit(a, b)
     n = (-d[1], d[0])
     k = 2 * math.pi / wavelength
     return [
         (
-            a[0] + d[0] * t + n[0] * amp * math.sin(k * t),
-            a[1] + d[1] * t + n[1] * amp * math.sin(k * t),
+            a[0] + d[0] * t + n[0] * (shift + amp * math.sin(k * t)),
+            a[1] + d[1] * t + n[1] * (shift + amp * math.sin(k * t)),
         )
         for t in (L * i / npts for i in range(npts + 1))
     ]
