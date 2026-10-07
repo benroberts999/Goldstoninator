@@ -147,6 +147,19 @@ A loop of three or more `G` lines is drawn as the circle through its vertices (a
 `fd.diagram(term).layout(cols=, rows=)` sets the grid when the automatic one is not what you want.
 `vertical=('Qi', ...)` forces the lines of those names to run vertically, as in a Goldstone diagram (with `straight=False` when they join two vertices of the fermion line).
 
+### Goldstone diagrams from a Feynman diagram
+
+`fd.goldstone(term)` expands a Feynman diagram into its Goldstone diagrams, one per time ordering of its interactions (the Coulomb lines and the markers), as a goldstoninator grid, so the pictures, the sum of the terms with signs and energy denominators, and the exports all come for free:
+
+```python
+g = fd.goldstone("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)")   # the two time orderings of the direct term
+g                                                            # the Goldstone pictures
+g.equation()                                                 # their sum, with denominators
+fd.diagram("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)").goldstone_terms()   # ['g_{mnva} g_{avnm}', 'g_{mvba} g_{abvm}']
+```
+
+A Coulomb line `Q(i,j)` becomes the integral g<sub>pqrs</sub> with p, r the fermion lines leaving and entering vertex i and q, s those at vertex j (`X` stays `X`, any other line keeps its name); a marker `T(i)` becomes the one-body T<sub>pr</sub>; both external legs carry the valence letter of the incoming line. For each ordering, a fermion line that runs forward in time is a particle (letters m, n, r, s, …) and one that runs backward, or starts and ends at the same interaction, is a hole (a, b, c, …); `Gex` is only ever a particle and `Pa` only a hole, so orderings that would make them the other are dropped. Every vertex must hold exactly one interaction (a Coulomb-line end or a marker) with one fermion line in and one out, and a shaded loop `PIH` has no expansion. The number of diagrams is the number of orderings: n! for n interactions with plain `G` lines.
+
 ### Energies
 
 `energies=True` labels every line with its energy, from energy conservation at each vertex:

@@ -49,6 +49,12 @@ for repeated names), each interaction line that conservation leaves free carries
 (omega_1, omega_2, ... in the order written, plain omega when there is one; the two Coulomb lines round
 a bubble share theirs) and each closed fermion loop an eps' (eps'', ...); the fermion lines then read
 eps_v - omega and so on, the outgoing leg eps_v + omega_T.  diagram(term).energies() lists them as LaTeX.
+Goldstone diagrams: goldstone(term) draws the Goldstone diagrams of a Feynman term, one per time ordering of
+its interactions (Coulomb lines and markers), as a goldstoninator Grid, so .equation() is their sum with
+signs and energy denominators; diagram(term).goldstone_terms() gives the terms.  A Coulomb line Q(i,j)
+becomes g_{pqrs} from the fermion lines at its ends, a marker T(i) the one-body T_{pr}; a fermion line
+forward in time is a particle, backward (or within one interaction) a hole; Gex only forward, Pa only
+backward.
 Size: scale= is the size of the picture (pixels per diagram unit, 40 by default) and font= the size of the
 labels in points (by default 0.4 of a unit, so they scale with the picture; font=12 keeps them at 12 pt
 whatever the scale).  In TikZ, unit= scales the picture and font= the labels (else the document font).
@@ -620,16 +626,14 @@ class Diagram(gd.Picture):
         return s, pos
 
     # ------------------------------------------------------------------------------------------
-    # energies
+    # the direction of the lines
     # ------------------------------------------------------------------------------------------
-    def _energy_map(self):
-        """the energy of every line from conservation at each vertex: {edge index: Energy}, with 'in'
-        and 'out' for the external legs and ('field', vertex) for the markers.  Fermion lines carry
-        their energy along the chain, or round a loop in the direction of propagation; an interaction
-        line carries its omega away from the vertex earlier on the chain (so the chain reads
-        eps_v - omega), and when its energy is fixed by the others it is labelled with a positive
-        leading term (the line has no direction).  Free energies: the interaction lines first (omega,
-        or omega_1, omega_2, ... in the order written), then one eps' per closed fermion loop"""
+    def _flow(self):
+        """the (from, to) vertices of every edge, with the indices of the fermion and of the
+        interaction edges and {chain edge: its position along the chain}.  A fermion line runs along
+        the chain from the incoming to the outgoing vertex, round a loop in the direction of
+        propagation, else from b to a for G(a,b); an interaction line runs away from the vertex
+        earlier on the chain (it has no direction of its own)"""
         E = self.edges
         chain = self.chain or _chain(E, self.vin, self.vout)
         steps = {frozenset(ab): ab for ab in zip(chain, chain[1:])}
@@ -639,7 +643,7 @@ class Diagram(gd.Picture):
                 rounds.setdefault(frozenset(ab), ab)
         order = {v: i for i, v in enumerate(chain)}
         rank = lambda v: order.get(v, len(chain) + self.vertices.index(v))
-        fermion, inter, flow, along = [], [], [], {}  # flow: (from, to) of each edge
+        fermion, inter, flow, along = [], [], [], {}
         for i, (name, u, v, _) in enumerate(E):
             key = frozenset((u, v))
             if name in FERMIONS or name in POLARS:
@@ -654,6 +658,118 @@ class Diagram(gd.Picture):
             else:
                 inter.append(i)
                 flow.append((u, v) if rank(u) <= rank(v) else (v, u))
+        return flow, fermion, inter, along
+
+    # ------------------------------------------------------------------------------------------
+    # Goldstone diagrams
+    # ------------------------------------------------------------------------------------------
+    def goldstone_terms(self):
+        """the Goldstone terms of the diagram, one per time ordering of its interactions (the Coulomb
+        lines and the markers), as goldstoninator reads them.  A Coulomb line Q(i,j) is the integral
+        g_{pqrs} with p, r the fermion lines leaving and entering vertex i and q, s those at j (X stays
+        X, any other line keeps its name); a marker T(i) is the one-body T_{pr}; both external legs
+        carry the valence letter of the incoming line.  A fermion line that runs forward in time is a particle
+        (letters m n r s ...), one that runs backward, or starts and ends at the same interaction, a
+        hole (a b c ...); Gex is a particle only and Pa a hole only, so orderings that would make them
+        the other are left out.  The integrals are written earliest first.  Needs every vertex to hold
+        one interaction (a Coulomb-line end or a marker) with one fermion line in and one out; a shaded
+        loop PIH has no expansion"""
+        E = self.edges
+        flow, fermion, inter, _ = self._flow()
+        inters = [(E[i][0], E[i][1:3]) for i in inter]  # (name, vertices) of each interaction
+        inters += [
+            (name, tuple(labels))
+            for name, *labels in self.factors
+            if len(labels) == 1 and name not in self.ext_names
+        ]
+        at = {}  # vertex -> its interaction
+        for k, (name, vs) in enumerate(inters):
+            for x in vs:
+                if x in at:
+                    raise ValueError(
+                        "vertex %s holds two interactions, %s and %s: %s"
+                        % (x, inters[at[x]][0], name, self._term_str())
+                    )
+                at[x] = k
+        ins, outs = {}, {}  # vertex -> ('line', edge) or ('leg', letter) entering, leaving it
+        for i in fermion:
+            if E[i][0] in POLAR_SHADED:
+                raise ValueError("a shaded loop has no Goldstone expansion: " + self._term_str())
+            src, dst = flow[i]
+            if src in outs or dst in ins:
+                raise ValueError("two fermion lines %s vertex %s: %s" % (
+                    "leave" if src in outs else "enter", src if src in outs else dst, self._term_str()))
+            outs[src], ins[dst] = ("line", i), ("line", i)
+        val = self.ext[0][0] if self.ext else None  # the valence letter, for both legs
+        if self.vin is not None:
+            ins[self.vin] = ("leg", val)
+        if self.vout is not None:
+            outs[self.vout] = ("leg", val)
+        for x in self.vertices:
+            if x not in at:
+                raise ValueError("vertex %s holds no Coulomb line or marker: %s" % (x, self._term_str()))
+            if x not in ins or x not in outs:
+                raise ValueError(
+                    "vertex %s needs a fermion line in and one out: %s" % (x, self._term_str())
+                )
+        base = lambda name: next((b for b in COULOMB if name in (b, b + "s", b + "u", b + "d")), name)
+        gname = lambda name: "g" if base(name) == "Q" else base(name)
+        terms = []
+        for perm in itertools.permutations(range(len(inters))):  # perm[t]: the interaction at time t
+            time = {k: t for t, k in enumerate(perm)}
+            letters, core, exc = {}, iter(gd.CORE), iter(gd.EXC)
+            try:
+                for i in fermion:
+                    src, dst = flow[i]
+                    if time[at[src]] < time[at[dst]]:  # forward in time: a particle
+                        if E[i][0] == "Pa":
+                            break
+                        letters[i] = next(exc)
+                    else:  # backward, or within one interaction: a hole
+                        if E[i][0] == "Gex":
+                            break
+                        letters[i] = next(core)
+                else:
+                    letter = lambda end: end[1] if end[0] == "leg" else letters[end[1]]
+                    factors = []
+                    for k in perm:
+                        name, vs = inters[k]
+                        if len(vs) == 2:
+                            u, v = vs
+                            factors.append("%s_{%s%s%s%s}" % (
+                                gname(name), letter(outs[u]), letter(outs[v]), letter(ins[u]), letter(ins[v])))
+                        else:
+                            factors.append("%s_{%s%s}" % (name, letter(outs[vs[0]]), letter(ins[vs[0]])))
+                    terms.append(" ".join(factors))
+            except StopIteration:
+                raise ValueError("too many fermion lines for the letters %s / %s" % (gd.CORE, gd.EXC))
+        return terms
+
+    def goldstone(self, ncols=3, **kw):
+        """the Goldstone diagrams of the diagram, one per time ordering of its interactions, as a
+        goldstoninator Grid (shown inline; .equation() is their sum, .diagrams the list); the keywords
+        go to gd.diagram (styles, scale, font, omega, ...)"""
+        out = []
+        for n, t in enumerate(self.goldstone_terms()):
+            d = gd.diagram(t, **kw)
+            if d.order != list(range(len(d.verts))):  # the written order is the time order
+                raise ValueError("goldstoninator orders %r differently" % t)
+            out.append(d)
+        return gd.Grid(out, ncols=ncols)
+
+    # ------------------------------------------------------------------------------------------
+    # energies
+    # ------------------------------------------------------------------------------------------
+    def _energy_map(self):
+        """the energy of every line from conservation at each vertex: {edge index: Energy}, with 'in'
+        and 'out' for the external legs and ('field', vertex) for the markers.  Fermion lines carry
+        their energy along the chain, or round a loop in the direction of propagation; an interaction
+        line carries its omega away from the vertex earlier on the chain (so the chain reads
+        eps_v - omega), and when its energy is fixed by the others it is labelled with a positive
+        leading term (the line has no direction).  Free energies: the interaction lines first (omega,
+        or omega_1, omega_2, ... in the order written), then one eps' per closed fermion loop"""
+        E = self.edges
+        flow, fermion, inter, along = self._flow()
         rows = {x: [{}, Energy()] for x in self.vertices}  # in - out + known = 0 at each vertex
         for i, (src, dst) in enumerate(flow):
             if src != dst:
@@ -912,6 +1028,12 @@ def diagram(term, **kw):
     """the Feynman diagram of a term (string or list of tuples); keywords: styles, ext, pad, straight,
     curved, vertical, energies, scale (pixels per unit), font (label size in points)"""
     return term if isinstance(term, Diagram) else Diagram(term, **kw).layout()
+
+
+def goldstone(term, ncols=3, **kw):
+    """the Goldstone diagrams of a Feynman term, one per time ordering of its interactions: a
+    goldstoninator Grid (see Diagram.goldstone_terms for the rules); keywords go to gd.diagram"""
+    return Diagram(term).goldstone(ncols=ncols, **kw)
 
 
 def grid(terms, ncols=3, scale=None, gap=6.0, **kw):
