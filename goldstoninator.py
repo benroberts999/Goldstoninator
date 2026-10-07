@@ -49,6 +49,7 @@ Usage (see goldstoninator.ipynb):
     gd.diagram('h_na g_wavn', omega=False)      # static field: no omega (then eps_w is kept where it occurs)
     gd.diagram('h_na S_wavn', omega={'h': r'\\omega', 'S': True})   # symbol per name; True: omega_{name}
     gd.diagram('g_vamn g_mnva', labels=False)   # the picture without the orbital labels
+    gd.diagram('g_vamn g_mnva', scale=60, font=12)   # a bigger picture (pixels per unit) with 12 pt labels
 No dependencies beyond the standard library.
 
 Letter classes (override with core='abcd', val='v', exc='...' or types=dict(a='core', ...)):
@@ -158,9 +159,23 @@ class Picture:
         straight [(a, b)]            plain solid line (the external legs)
         marker   [(p, style)]        x (cross), dot, circle or square at p
         arrows   [(p, d)]            arrowhead at p pointing along the unit vector d
-        labels   [(text, p)]         italic label centred at p
+        labels   [(text, p)]         label centred at p: a letter, or a little LaTeX math (Greek letters,
+                                     subscripts, primes, + and -: \\varepsilon_{v}-\\omega), in every output
         bbox     [x0, y0, x1, y1]
-    svg(), pdf(), tikz() and save() draw it; _repr_svg_ shows it inline in Jupyter."""
+    svg(), pdf(), tikz() and save() draw it; _repr_svg_ shows it inline in Jupyter.  scale is the
+    size of the picture (pixels per diagram unit in the SVG and PDF), font the size of the labels in
+    points (None: 0.4 of a unit, so that they scale with the picture; in TikZ, the document font)."""
+
+    scale = 40.0
+    font = None
+
+    def font_size(self, scale):
+        """the label font size in pixels at the given scale"""
+        return self.font or 0.4 * scale
+
+    def font_units(self):
+        """the label font size in diagram units (at the picture's own scale)"""
+        return self.font / self.scale if self.font else 0.4
 
     def _geometry(self):
         raise NotImplementedError
@@ -168,7 +183,8 @@ class Picture:
     def _term_str(self) -> str:
         return ""
 
-    def size(self, scale=40.0):
+    def size(self, scale=None):
+        scale = scale or self.scale
         x0, y0, x1, y1 = self._geometry()["bbox"]
         return (x1 - x0) * scale, (y1 - y0) * scale
 
@@ -300,14 +316,11 @@ class Picture:
                 % " ".join("%.1f,%.1f" % T(q) for q in (l, tip, r))
             )
         for lab, p in g["labels"]:
-            el.append(
-                '<text x="%.1f" y="%.1f" font-family="serif" font-style="italic" font-size="%.0f" '
-                'text-anchor="middle" dominant-baseline="middle">%s</text>'
-                % (T(p) + (0.4 * scale, lab))
-            )
+            el.append(_svg_label(lab, *T(p), self.font_size(scale)))
         return "\n".join(el)
 
-    def svg(self, scale=40.0):
+    def svg(self, scale=None):
+        scale = scale or self.scale
         W, H = self.size(scale)
         return _svg_wrap(self.svg_body(scale), W, H)
 
@@ -416,16 +429,12 @@ class Picture:
         for p, d in g.get("openarrows", []):
             tip, l, r = [T(v) for v in _arrowhead(p, d)]
             el.append("%.2f %.2f m %.2f %.2f l %.2f %.2f l S" % (l + tip + r))
-        fs = 0.4 * scale
         for lab, p in g["labels"]:
-            px, py = T(p)
-            el.append(
-                "BT /F1 %.1f Tf %.2f %.2f Td (%s) Tj ET"
-                % (fs, px - 0.25 * fs, py - 0.2 * fs, lab)
-            )
+            el.append(_pdf_label(lab, *T(p), self.font_size(scale)))
         return "\n".join(el)
 
-    def pdf(self, scale=40.0):
+    def pdf(self, scale=None):
+        scale = scale or self.scale
         W, H = self.size(scale)
         return _pdf_wrap(self.pdf_body(scale), W, H)
 
@@ -509,7 +518,7 @@ class Picture:
             tip, l, r = _arrowhead(p, d)
             el.append("\\draw %s -- %s -- %s;" % (C(l), C(tip), C(r)))
         for lab, p in g["labels"]:
-            el.append("\\node at %s {$%s$};" % (C(p), lab))
+            el.append("\\node%s at %s {$%s$};" % (_tikz_font(self.font), C(p), lab))
         return "\n".join(el)
 
     def tikz(self, unit=1.0, standalone=False):
@@ -523,7 +532,7 @@ class Picture:
         )
         return _tikz_standalone(body) if standalone else body
 
-    def save(self, path, scale=40.0, unit=1.0):
+    def save(self, path, scale=None, unit=1.0):
         """write .svg, .pdf, .tikz (tikzpicture, to \\input) or .tex (standalone TikZ document)"""
         return _save(self, path, scale, unit)
 
@@ -556,8 +565,12 @@ class Diagram(Picture):
         pad=0.35,
         omega=True,
         labels=True,
+        scale=None,
+        font=None,
     ):
         self.names, self.gs = parse_term(term)
+        self.scale = scale or Picture.scale
+        self.font = font
         self.styles = dict(STYLES)
         self.styles.update(canon_styles(styles))
         self.pad = pad
@@ -1094,8 +1107,9 @@ class Diagram(Picture):
 # several diagrams side by side
 # ----------------------------------------------------------------------------------------------
 class Grid:
-    def __init__(self, diagrams, ncols=3, scale=40.0, gap=6.0):
-        self.diagrams, self.ncols, self.scale, self.gap = diagrams, ncols, scale, gap
+    def __init__(self, diagrams, ncols=3, scale=None, gap=6.0):
+        self.diagrams, self.ncols, self.gap = diagrams, ncols, gap
+        self.scale = scale or (diagrams[0].scale if diagrams else Picture.scale)
 
     def _place(self):
         """[(diagram, ox, oy_top, w, h)], total W, H  (y measured downwards from the top)"""
@@ -1185,17 +1199,18 @@ class Equation(str):
 
 
 def diagram(term, **kw):
-    """the diagram of one term (string or list of integrals); keywords: styles, pad, omega, labels,
+    """the diagram of one term (string or list of integrals); keywords: styles, pad, omega, labels, scale,
+    font,
     core/exc/val, types"""
     if isinstance(term, Diagram):
         return term
     return Diagram(term, **kw).layout()
 
 
-def grid(terms, ncols=3, scale=40.0, gap=6.0, **kw):
+def grid(terms, ncols=3, scale=None, gap=6.0, **kw):
     """diagrams of several terms side by side (shown inline in Jupyter; .tex(), .equation(), .tikz(),
-    .save('x.svg'/'x.pdf'/'x.tikz'/'x.tex'))"""
-    return Grid([diagram(t, **kw) for t in terms], ncols=ncols, scale=scale, gap=gap)
+    .save('x.svg'/'x.pdf'/'x.tikz'/'x.tex')); keywords as for diagram()"""
+    return Grid([diagram(t, scale=scale, **kw) for t in terms], ncols=ncols, scale=scale, gap=gap)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1203,13 +1218,13 @@ def grid(terms, ncols=3, scale=40.0, gap=6.0, **kw):
 # ----------------------------------------------------------------------------------------------
 def _save(obj, path, scale, unit):
     if path.endswith(".svg"):
-        open(path, "w").write(obj.svg() if scale is None else obj.svg(scale))
+        open(path, "w", encoding="utf-8").write(obj.svg() if scale is None else obj.svg(scale))
     elif path.endswith(".pdf"):
         open(path, "wb").write(obj.pdf() if scale is None else obj.pdf(scale))
     elif path.endswith(".tikz"):
-        open(path, "w").write(obj.tikz(unit) + "\n")
+        open(path, "w", encoding="utf-8").write(obj.tikz(unit) + "\n")
     elif path.endswith(".tex"):
-        open(path, "w").write(obj.tikz(unit, standalone=True))
+        open(path, "w", encoding="utf-8").write(obj.tikz(unit, standalone=True))
     else:
         raise ValueError("use a .svg, .pdf, .tikz or .tex file name")
     return path
@@ -1250,10 +1265,11 @@ def _pdf_wrap(body, W, H):
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Contents 4 0 R "
-        "/Resources << /Font << /F1 5 0 R >> >> >>" % (W, H),
+        "/Resources << /Font << /F1 5 0 R%s >> >> >>"
+        % (W, H, " /F2 6 0 R" if "/F2" in body else ""),
         "<< /Length %d >>\nstream\n%s\nendstream" % (len(body.encode("latin-1")), body),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic >>",
-    ]
+    ] + (["<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>"] if "/F2" in body else [])
     out = b"%PDF-1.4\n"
     offsets = []
     for i, o in enumerate(objs):
@@ -1367,6 +1383,13 @@ _PDF_DASH = {"dashed": "[6 4] 0 d", "dotted": "[0.1 3.5] 0 d 1 J"}
 _GREY = 0.85  # the grey level of a shaded lens (0 black, 1 white)
 
 
+def _tikz_font(font):
+    """the node option for labels of the given size in points ('' for the document font)"""
+    if not font:
+        return ""
+    return "[font=\\fontsize{%s}{%s}\\selectfont]" % (_num(font), _num(1.2 * font))
+
+
 def _tikz_opt(style, unit):
     """the TikZ options of a line style: '[...]' or ''"""
     snake = "decorate,decoration={snake,amplitude=%smm,segment length=%smm}" % (
@@ -1382,6 +1405,142 @@ def _tikz_opt(style, unit):
         "double": double,
     }.get(style, "")
     return "[%s]" % opt if opt else ""
+
+
+# the labels: a letter, or a little LaTeX math.  A label is split into pieces (text, kind, level):
+# kind it (letters, italic), greek, rm (digits and the like, upright) or op (+ - = '), level 0, -1
+# (subscript) or 1 (superscript).  TikZ gets the LaTeX itself; the SVG uses Unicode, the PDF the
+# Symbol font (/F2) for Greek letters and operators
+_GREEK = {  # LaTeX name: (Unicode, its code in the Symbol font)
+    "alpha": ("α", "a"), "beta": ("β", "b"), "gamma": ("γ", "g"), "delta": ("δ", "d"),
+    "epsilon": ("ε", "e"), "varepsilon": ("ε", "e"), "zeta": ("ζ", "z"), "eta": ("η", "h"),
+    "theta": ("θ", "q"), "vartheta": ("ϑ", "J"), "iota": ("ι", "i"), "kappa": ("κ", "k"),
+    "lambda": ("λ", "l"), "mu": ("μ", "m"), "nu": ("ν", "n"), "xi": ("ξ", "x"),
+    "pi": ("π", "p"), "varpi": ("ϖ", "v"), "rho": ("ρ", "r"), "sigma": ("σ", "s"),
+    "varsigma": ("ς", "V"), "tau": ("τ", "t"), "upsilon": ("υ", "u"), "phi": ("φ", "f"),
+    "varphi": ("ϕ", "j"), "chi": ("χ", "c"), "psi": ("ψ", "y"), "omega": ("ω", "w"),
+    "Gamma": ("Γ", "G"), "Delta": ("Δ", "D"), "Theta": ("Θ", "Q"), "Lambda": ("Λ", "L"),
+    "Xi": ("Ξ", "X"), "Pi": ("Π", "P"), "Sigma": ("Σ", "S"), "Upsilon": ("Υ", "U"),
+    "Phi": ("Φ", "F"), "Psi": ("Ψ", "Y"), "Omega": ("Ω", "W"),
+}  # fmt: skip
+_OPS = {  # operator: (Unicode, Symbol font code, width in em)
+    "-": (" − ", " - ", 1.0),
+    "+": (" + ", " + ", 1.0),
+    "=": (" = ", " = ", 1.0),
+    "'": ("′", "\xa2", 0.3),
+}
+_EM = {"it": 0.5, "greek": 0.55, "rm": 0.5}  # width of a character, in em
+
+
+def _label_tokens(text):
+    """[(text, kind, level)] of a label (see above); braces group, _ and ^ shift the level of the next
+    character or group, \\, and spaces are dropped, an unknown \\command shows its name upright"""
+    out, stack, level, pending, i = [], [], 0, None, 0
+
+    def emit(piece, kind):
+        nonlocal pending
+        lvl = level if pending is None else pending
+        pending = None
+        if out and out[-1][1] == kind and out[-1][2] == lvl and kind in ("it", "rm"):
+            out[-1] = (out[-1][0] + piece, kind, lvl)
+        else:
+            out.append((piece, kind, lvl))
+
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            m = re.match(r"\\([A-Za-z]+|.)", text[i:])
+            name = m.group(1)
+            i += m.end()
+            if name in _GREEK:
+                emit(name, "greek")
+            elif name.isalpha():
+                emit(name, "rm")
+        elif ch in "_^":
+            lvl = -1 if ch == "_" else 1
+            i += 1
+            if i < len(text) and text[i] == "{":
+                stack.append(level)
+                level = lvl
+                i += 1
+            else:
+                pending = lvl
+        elif ch == "{":
+            stack.append(level)
+            i += 1
+        elif ch == "}":
+            level = stack.pop() if stack else 0
+            i += 1
+        else:
+            i += 1
+            if ch in _OPS:
+                emit(ch, "op")
+            elif ch.isalpha():
+                emit(ch, "it")
+            elif not ch.isspace():
+                emit(ch, "rm")
+    return out
+
+
+def _label_em(tokens):
+    """the width of a label in em (an estimate)"""
+    return sum(
+        (_OPS[t][2] if kind == "op" else _EM[kind] * (1 if kind == "greek" else len(t)))
+        * (0.7 if lvl else 1)
+        for t, kind, lvl in tokens
+    )
+
+
+def label_width(text, font=0.4):
+    """the width a label takes in the picture (diagram units) at a font size of font units"""
+    return font * _label_em(_label_tokens(text))
+
+
+def _svg_label(text, px, py, fs):
+    """an SVG text element for a label centred at (px, py), font size fs (px)"""
+    tokens = _label_tokens(text)
+    head = (
+        '<text x="%.1f" y="%.1f" font-family="serif" font-style="italic" font-size="%.0f" '
+        'text-anchor="middle" dominant-baseline="middle">' % (px, py, fs)
+    )
+    esc = lambda t: t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if all(kind == "it" and lvl == 0 for _, kind, lvl in tokens):  # a plain word
+        return head + esc("".join(t for t, _, _ in tokens)) + "</text>"
+    rise = {0: 0.0, -1: 0.25 * fs, 1: -0.45 * fs}  # svg y runs down
+    parts, cur = [], 0
+    for t, kind, lvl in tokens:
+        attrs = ' dy="%.1f"' % (rise[lvl] - rise[cur]) if lvl != cur else ""
+        cur = lvl
+        if lvl:
+            attrs += ' font-size="%.0f"' % (0.7 * fs)
+        if kind in ("rm", "op"):
+            attrs += ' font-style="normal"'
+        shown = _GREEK[t][0] if kind == "greek" else _OPS[t][0] if kind == "op" else t
+        parts.append("<tspan%s>%s</tspan>" % (attrs, esc(shown)))
+    return head + "".join(parts) + "</text>"
+
+
+def _pdf_label(text, px, py, fs):
+    """the PDF text object of a label centred at (px, py), font size fs"""
+    tokens = _label_tokens(text)
+    esc = lambda t: t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    x = px - _label_em(tokens) * fs / 2
+    parts = ["BT /F1 %.1f Tf %.2f %.2f Td" % (fs, x, py - 0.2 * fs)]
+    font, rise = ("F1", fs), 0.0
+    for t, kind, lvl in tokens:
+        f = ("F1" if kind == "it" else "F2", 0.7 * fs if lvl else fs)
+        if f != font:
+            parts.append("/%s %.1f Tf" % f)
+            font = f
+        r = {0: 0.0, -1: -0.25 * fs, 1: 0.4 * fs}[lvl]
+        if r != rise:
+            parts.append("%.1f Ts" % r)
+            rise = r
+        shown = _GREEK[t][1] if kind == "greek" else _OPS[t][1] if kind == "op" else t
+        parts.append("(%s) Tj" % esc(shown))
+    if rise:
+        parts.append("0 Ts")
+    return " ".join(parts) + " ET"
 
 
 def canon_styles(styles):

@@ -105,6 +105,14 @@ Two-body lines: `wavy` (default for `g`), `doublewavy` (default for `X`; `double
 One-body markers: `x` or `cross` (default), `dot`, `circle`, `square`.
 `pad=` adds margin around the picture, `labels=False` leaves the orbital labels off it; the energy symbols are `gd.EPS` and `gd.OMEGA`.
 
+### Size
+
+`scale=` sets the size of the picture (pixels per diagram unit, 40 by default) and `font=` the size of the labels in points, independently: by default the labels are 0.4 of a unit, so they scale with the picture, while `font=12` keeps them at 12 pt whatever the scale. Both work on `diagram` and `grid`, for Goldstone and Feynman diagrams alike. In TikZ `unit=` (cm per diagram unit) scales the picture and the labels follow the document font unless `font=` is given.
+
+```python
+gd.diagram("g_vamn g_mnva", scale=60, font=12)   # a bigger picture, smaller labels
+```
+
 ## Feynman diagrams (`feynmanator.py`)
 
 The same pictures and files for Feynman diagrams, from a product of propagators. There are no rules to derive, only the drawing (`feynman_draw.ipynb` shows the examples below and more):
@@ -131,10 +139,21 @@ A factor is `name(label)` or `name(label,label)`; the labels name the vertices, 
 * `v(1)`, `w(2)` (names `v w x y`): external lines, with arrows. The first one written enters at the top left, the second leaves at the right; at most one of each.
 * Any other name with one label, `T(1)`, is a marker at that vertex (a cross by default); with two labels, `S(1,2)`, a dashed line. `styles={'T': 'dot', 'S': 'dotted', 'G': 'double'}` changes them, as for Goldstone diagrams. Two more line styles exist here: `arrow` and `arrows`, a solid line with one filled or two open arrowheads at its middle, pointing from the first label to the second.
 
-Nothing is drawn at a plain vertex, and there are no labels.
+Nothing is drawn at a plain vertex, and there are no labels unless `energies=True` (below).
 The vertices are placed on a small grid, the incoming vertex at the top left, the outgoing one at the right and the fermion line between them straight (`straight=False` frees it); every placement is scored (lines through a vertex, overlapping and crossing lines, length, size, bends, tilted bubbles) and the best one is drawn.
 Lines between the same two vertices are bent into arcs on alternate sides.
 A closed loop of `G` lines is drawn counterclockwise in the direction of propagation (`G(a,b)` runs from b to a), so writing the loop the other way round mirrors it: `G(3,i) t(i) G(i,6) G(6,3)` puts the insertion `i` on the upper line of the loop, `G(3,6) G(6,i) t(i) G(i,3)` on the lower one.
 A loop of three or more `G` lines is drawn as the circle through its vertices (a rounded ring for more than three), so an insertion sits on the curve.
 `fd.diagram(term).layout(cols=, rows=)` sets the grid when the automatic one is not what you want.
 `vertical=('Qi', ...)` forces the lines of those names to run vertically, as in a Goldstone diagram (with `straight=False` when they join two vertices of the fermion line).
+
+### Energies
+
+`energies=True` labels every line with its energy, from energy conservation at each vertex:
+
+```python
+fd.grid(["v(1) G(1,2) w(2) Q(1,2)", "v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)"], ncols=2, energies=True)
+fd.diagram("v(1) G(1,i) T(i) G(i,2) w(2) Q(1,2)").energies()   # {'v(1)': '\\varepsilon_{v}', 'G(1,i)': '\\varepsilon_{v}-\\omega', ...}
+```
+
+The incoming leg carries ε<sub>v</sub> (named after the external line), a marker `T(1)` injects an energy ω<sub>T</sub> (ω<sub>T′</sub>, ω<sub>T″</sub> for repeated names), each interaction line that conservation leaves free carries its own ω (ω<sub>1</sub>, ω<sub>2</sub>, … in the order written, plain ω when there is only one) and each closed fermion loop an ε′ (ε″, …); everything else follows, so the fermion line reads ε<sub>v</sub> − ω, the outgoing leg ε<sub>v</sub> + ω<sub>T</sub>, and the two Coulomb lines round a bubble share one ω. Fermion lines carry their energy along the line (round a loop in the direction of propagation); an interaction line, which has no direction, carries its ω away from the vertex earlier on the fermion line and is labelled with a positive leading term. The lines inside a shaded loop `PIH` are not labelled. Labels are LaTeX in the TikZ output and are typeset (Greek letters, subscripts, primes) in the SVG and PDF too; `scale=` and `font=` size the picture and the labels separately (see [Size](#size)).

@@ -29,7 +29,7 @@ vertex, any label will do.  The factors are
                  at the top left, the second goes out at the right; at most one of each
     T(1)         any other name with one label: a marker at that vertex (a cross; styles={'T': 'dot'})
     S(1,2)       any other name with two labels: a dashed line (styles={'S': 'dotted'})
-Nothing is drawn at a plain vertex and there are no labels.  Line styles: wavy, doublewavy, dashed, dotted,
+Nothing is drawn at a plain vertex and there are no labels (but see Energies).  Line styles: wavy, doublewavy, dashed, dotted,
 double, solid, arrow and arrows (solid with one filled or two open arrowheads at the middle, pointing from the first label to
 the second; styles={'G': 'double'} for dressed propagators); markers: x (= cross), dot, circle, square.
 
@@ -42,12 +42,23 @@ direction of propagation (G(a,b) goes from b to a): writing a loop the other way
 puts a vertex on the other side of the loop.  A loop of three or more G lines is drawn round: the
 circle through its vertices (a rounded ring for more than three), so an insertion sits on the curve.
 diagram(term).layout(cols=, rows=) sets the grid.
+
+Energies: diagram(term, energies=True) labels every line with its energy, from conservation at each
+vertex.  The incoming leg carries eps_v (v its name), a marker T injects omega_T (omega_T', omega_T''
+for repeated names), each interaction line that conservation leaves free carries its own omega
+(omega_1, omega_2, ... in the order written, plain omega when there is one; the two Coulomb lines round
+a bubble share theirs) and each closed fermion loop an eps' (eps'', ...); the fermion lines then read
+eps_v - omega and so on, the outgoing leg eps_v + omega_T.  diagram(term).energies() lists them as LaTeX.
+Size: scale= is the size of the picture (pixels per diagram unit, 40 by default) and font= the size of the
+labels in points (by default 0.4 of a unit, so they scale with the picture; font=12 keeps them at 12 pt
+whatever the scale).  In TikZ, unit= scales the picture and font= the labels (else the document font).
 No dependencies beyond the standard library (and goldstoninator.py).
 """
 
 import itertools
 import math
 import re
+from fractions import Fraction
 
 import goldstoninator as gd
 
@@ -105,10 +116,24 @@ class Diagram(gd.Picture):
     LOOP = 0.3  # radius of a closed loop
 
     def __init__(
-        self, term, styles=None, ext=EXT, pad=0.35, straight=True, curved=True, vertical=()
+        self,
+        term,
+        styles=None,
+        ext=EXT,
+        pad=0.35,
+        straight=True,
+        curved=True,
+        vertical=(),
+        energies=False,
+        scale=None,
+        font=None,
     ):
         self.factors = parse_term(term)
+        self.scale = scale or gd.Picture.scale
+        self.font = font
         self.vertical = set(vertical)  # names of lines that must run vertically
+        self.label_energies = energies  # label the lines with their energies
+        self.ext_names = ext
         self.styles = dict(STYLES)
         self.styles.update(gd.canon_styles(styles))
         self.pad = pad
@@ -126,7 +151,10 @@ class Diagram(gd.Picture):
                 st = self.styles.get(GREEN, "solid")
                 if name in POLAR:
                     st = self.styles.get(name, st)
-                self.edges += [(name, labels[0], labels[1], st)] * 2
+                self.edges += [
+                    (name, labels[0], labels[1], st),
+                    (name, labels[1], labels[0], st),
+                ]  # G(u,v) G(v,u): one line each way round
             else:
                 st = self.styles.get(name, gd.DEFAULT_STYLE)
                 self.edges.append((name, labels[0], labels[1], st))
@@ -149,20 +177,20 @@ class Diagram(gd.Picture):
     # hold only some of the vertices while the layout is being built
     # ------------------------------------------------------------------------------------------
     def _pieces(self, pos):
-        """[(kind, data, style, points, ends, bent, dirn, name)]: kind/data = line (a, b) | arc (a, c, b), a
+        """[(kind, data, style, points, ends, bent, dirn, edge)]: kind/data = line (a, b) | arc (a, c, b), a
         Bezier arc with control point c | ring (c, r, t0, t1), a circular arc of a round loop |
         loop (c, r), a line from a vertex to itself; points approximate the line (for the crossing
         tests); ends are the vertex positions it is attached to; bent is the cost of a line that
         does not run straight because a vertex is in the way (100 for a fermion line, which should
         never bend, 8 otherwise); dirn = (position of the first label, of the second), None for a loop at
-        one vertex; name is the name of the line"""
+        one vertex; edge is the index of the line in self.edges"""
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         pts = [P(v) for v in self.vertices if v in pos]
         cen = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
         groups = {}
-        for e in self.edges:
+        for i, e in enumerate(self.edges):
             if e[1] in pos and e[2] in pos:
-                groups.setdefault(frozenset(e[1:3]), []).append(e)
+                groups.setdefault(frozenset(e[1:3]), []).append((i, e))
         out = []
         rings = self._rings(pos, P)
         for key, members in groups.items():
@@ -172,8 +200,8 @@ class Diagram(gd.Picture):
                 (u,) = key
                 p = P(u)
                 d = _away(p, cen)
-                for i, (name, _, _, st) in enumerate(members):
-                    ang = math.atan2(d[1], d[0]) + (i - (len(members) - 1) / 2) * 1.2
+                for j, (i, (name, _, _, st)) in enumerate(members):
+                    ang = math.atan2(d[1], d[0]) + (j - (len(members) - 1) / 2) * 1.2
                     c = (
                         p[0] + self.LOOP * math.cos(ang),
                         p[1] + self.LOOP * math.sin(ang),
@@ -187,7 +215,7 @@ class Diagram(gd.Picture):
                             (p,),
                             0,
                             None,
-                            name,
+                            i,
                         )
                     )
                 continue
@@ -197,17 +225,17 @@ class Diagram(gd.Picture):
             mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
             far = _side(n, (mid[0] - cen[0], mid[1] - cen[1]))
             members = sorted(
-                members, key=lambda e: e[0] not in FERMIONS
+                members, key=lambda ie: ie[1][0] not in FERMIONS
             )  # the fermion line goes straight
             m = len(members)
             if (
-                m == 2 and members[0][0] == members[1][0]
+                m == 2 and members[0][1][0] == members[1][1][0]
             ):  # polarisation loop: a symmetric lens
                 levels = [1, -1]
             else:
                 levels = [0, 1, -1, 2, -2, 3, -3][:m]
             h = min(max(0.8 * gd._dist(a, b), 0.7), 1.2)
-            for (name, u, v, st), k in zip(members, levels):
+            for (i, (name, u, v, st)), k in zip(members, levels):
                 dirn = (P(u), P(v))
                 forced = name in COULOMB_UP + COULOMB_DOWN  # the side is prescribed
                 up = _side(
@@ -218,7 +246,7 @@ class Diagram(gd.Picture):
                     c, poly = _arc(
                         a, b, mid, n, side * abs(k) * h if forced else far * k * h
                     )
-                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn, name))
+                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn, i))
                     continue
                 through = _hits(
                     [a, b], pts, (a, b)
@@ -235,7 +263,7 @@ class Diagram(gd.Picture):
                             (a, b),
                             100 if through else 0,
                             dirn,
-                            name,
+                            i,
                         )
                     )
                 elif (
@@ -256,7 +284,7 @@ class Diagram(gd.Picture):
                             (a, b),
                             100 if name in FERMIONS else 8,
                             dirn,
-                            name,
+                            i,
                         )
                     )
                 elif m == 1 and (
@@ -265,9 +293,9 @@ class Diagram(gd.Picture):
                     c, poly = _arc(
                         a, b, mid, n, side * min(max(0.4 * gd._dist(a, b), 0.35), 0.7)
                     )
-                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn, name))
+                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn, i))
                 else:
-                    out.append(("line", (a, b), st, [a, b], (a, b), 0, dirn, name))
+                    out.append(("line", (a, b), st, [a, b], (a, b), 0, dirn, i))
         return out
 
     def _rings(self, pos, P):
@@ -592,6 +620,137 @@ class Diagram(gd.Picture):
         return s, pos
 
     # ------------------------------------------------------------------------------------------
+    # energies
+    # ------------------------------------------------------------------------------------------
+    def _energy_map(self):
+        """the energy of every line from conservation at each vertex: {edge index: Energy}, with 'in'
+        and 'out' for the external legs and ('field', vertex) for the markers.  Fermion lines carry
+        their energy along the chain, or round a loop in the direction of propagation; an interaction
+        line carries its omega away from the vertex earlier on the chain (so the chain reads
+        eps_v - omega), and when its energy is fixed by the others it is labelled with a positive
+        leading term (the line has no direction).  Free energies: the interaction lines first (omega,
+        or omega_1, omega_2, ... in the order written), then one eps' per closed fermion loop"""
+        E = self.edges
+        chain = self.chain or _chain(E, self.vin, self.vout)
+        steps = {frozenset(ab): ab for ab in zip(chain, chain[1:])}
+        rounds = {}
+        for loop in self.loops:
+            for ab in zip(loop, loop[1:] + loop[:1]):
+                rounds.setdefault(frozenset(ab), ab)
+        order = {v: i for i, v in enumerate(chain)}
+        rank = lambda v: order.get(v, len(chain) + self.vertices.index(v))
+        fermion, inter, flow, along = [], [], [], {}  # flow: (from, to) of each edge
+        for i, (name, u, v, _) in enumerate(E):
+            key = frozenset((u, v))
+            if name in FERMIONS or name in POLARS:
+                fermion.append(i)
+                if name in FERMIONS and key in steps:
+                    flow.append(steps[key])
+                    along[i] = order[steps[key][0]]
+                elif name in FERMIONS and key in rounds:
+                    flow.append(rounds[key])
+                else:
+                    flow.append((v, u))  # G(a,b) runs from b to a
+            else:
+                inter.append(i)
+                flow.append((u, v) if rank(u) <= rank(v) else (v, u))
+        rows = {x: [{}, Energy()] for x in self.vertices}  # in - out + known = 0 at each vertex
+        for i, (src, dst) in enumerate(flow):
+            if src != dst:
+                rows[dst][0][i] = rows[dst][0].get(i, 0) + 1
+                rows[src][0][i] = rows[src][0].get(i, 0) - 1
+        out = {}
+        if self.vin is not None:
+            out["in"] = Energy({("eps", self.ext[0][0]): 1})
+            rows[self.vin][1] += out["in"]
+        if self.vout is not None:
+            rows[self.vout][0]["out"] = -1
+        seen = {}
+        for name, *labels in self.factors:
+            if len(labels) == 1 and name not in self.ext_names:  # a marker: the field absorbed
+                sub = name + "'" * seen.get(name, 0)
+                seen[name] = seen.get(name, 0) + 1
+                w = Energy({("omega", sub): 1})
+                rows[labels[0]][1] += w
+                out[("field", labels[0])] = out.get(("field", labels[0]), Energy()) + w
+        # row reduction, the columns ordered so that the free ones are interaction lines and loops
+        cols = ["out"] if self.vout is not None else []
+        cols += sorted(along, key=along.get) + [i for i in fermion if i not in along]
+        cols += inter[::-1]
+        eqs = [r for r in rows.values() if r[0]]
+        pivot, done = {}, set()
+        for col in cols:
+            k = next((k for k in range(len(eqs)) if k not in done and eqs[k][0].get(col)), None)
+            if k is None:
+                continue
+            f = Fraction(1) / eqs[k][0][col]
+            coef = {x: c * f for x, c in eqs[k][0].items()}
+            const = eqs[k][1] * f
+            eqs[k] = [coef, const]
+            for j in range(len(eqs)):
+                if j != k and eqs[j][0].get(col):
+                    fj = eqs[j][0][col]
+                    cj = dict(eqs[j][0])
+                    for x, c in coef.items():
+                        cj[x] = cj.get(x, 0) - fj * c
+                    eqs[j] = [{x: c for x, c in cj.items() if c}, eqs[j][1] - const * fj]
+            pivot[col] = k
+            done.add(k)
+        value = {}
+        free = [i for i in inter if i not in pivot]
+        for k, i in enumerate(free):
+            value[i] = Energy({("omega", str(k + 1) if len(free) > 1 else ""): 1})
+        n = 0
+        for i in fermion:
+            if i not in pivot:
+                if E[i][0] in POLAR_SHADED:  # inside a shaded loop: never shown
+                    value[i] = Energy({("eps", "?"): 1})
+                else:
+                    n += 1
+                    value[i] = Energy({("eps", "'" * n): 1})
+        if self.vout is not None and "out" not in pivot:
+            value["out"] = Energy({("eps", self.ext[1][0]): 1})
+        for col, k in pivot.items():
+            coef, const = eqs[k]
+            e = -const
+            for x, c in coef.items():
+                if x != col:
+                    e = e - value[x] * c
+            value[col] = e
+        for i in inter:
+            if i in pivot and value[i].leading() < 0:
+                value[i] = -value[i]
+        out.update({i: value[i] for i in range(len(E))})
+        if self.vout is not None:
+            out["out"] = value["out"]
+        return out
+
+    def energies(self):
+        """the energy of every line as LaTeX, {factor: energy}: 'v(1)', 'w(2)' the external legs,
+        'G(1,2)' a line (a polarisation loop PI(1,2) is listed as PI(1,2) and PI(2,1), its two lines),
+        'T(1)' the energy a marker injects; see _energy_map for the rules"""
+        em = self._energy_map()
+        out = {}
+        if "in" in em:
+            out["%s(%s)" % self.ext[0]] = em["in"].tex()
+        if "out" in em:
+            out["%s(%s)" % self.ext[1]] = em["out"].tex()
+        for i, (name, u, v, _) in enumerate(self.edges):
+            if name not in POLAR_SHADED:  # the lines inside a shaded loop are not shown
+                out["%s(%s,%s)" % (name, u, v)] = em[i].tex()
+        seen = set()
+        for name, *labels in self.factors:
+            if (
+                len(labels) == 1
+                and name not in self.ext_names
+                and ("field", labels[0]) in em
+                and labels[0] not in seen
+            ):
+                out["%s(%s)" % (name, labels[0])] = em[("field", labels[0])].tex()
+                seen.add(labels[0])
+        return out
+
+    # ------------------------------------------------------------------------------------------
     def _geometry(self):
         if not self.pos:
             self.layout()
@@ -613,8 +772,57 @@ class Diagram(gd.Picture):
             )
         }
         extent = [P(v) for v in self.vertices]
+        cen = (
+            sum(p[0] for p in extent) / len(extent),
+            sum(p[1] for p in extent) / len(extent),
+        )
+        top = max(p[1] for p in extent)
+        pieces = self._pieces(pos)
+        legs = self._legs(pos)
+        energy = self._energy_map() if self.label_energies else {}
+        obstacles = [(poly, i) for _, _, _, poly, _, _, _, i in pieces]  # what a label keeps clear of
+        obstacles += [(list(ab), None) for ab in legs]
+        obstacles += [([P(v)], None) for v in self.vertices]
+        boxes = []  # the labels placed so far, (x0, y0, x1, y1)
+        k = self.font_units() / 0.4  # the label size relative to the usual one: room and offsets scale with it
+        wanted = []  # (rank, key, candidate points, own edge): the labels, placed in order of rank
+        chain = self.chain or _chain(self.edges, self.vin, self.vout)
+        steps = {frozenset(ab) for ab in zip(chain, chain[1:])}
+
+        def clear(p, me):
+            """the distance from p to the nearest line other than me"""
+            return min(
+                (
+                    _seg_dist(p, poly[j], poly[min(j + 1, len(poly) - 1)])
+                    for poly, i in obstacles
+                    if i is None or i != me
+                    for j in range(len(poly))
+                ),
+                default=1.0,
+            )
+
+        def label(key, cands, me=None):
+            """the energy of key at the first candidate point clear of the lines and of the labels so
+            far (else the clearest), with the room it takes"""
+            text = energy[key].tex()
+            w = gd.label_width(text, self.font_units()) / 2
+            box = lambda p: (p[0] - w, p[1] - 0.15 * k, p[0] + w, p[1] + 0.15 * k)
+            gap = lambda b: min(  # the separation from the labels so far (negative: overlap)
+                (max(o[0] - b[2], b[0] - o[2], o[1] - b[3], b[1] - o[3]) for o in boxes),
+                default=1.0,
+            )
+            room = lambda c: min(  # the clearance from the lines, along the width of the label
+                clear((c[0] + f * w, c[1]), me) for f in (-1, -0.5, 0, 0.5, 1)
+            )
+            score = lambda c: min(room(c) - 0.2 * k, gap(box(c)) - 0.03)
+            p = next((c for c in cands if score(c) >= 0), None) or max(cands, key=score)
+            g["labels"].append((text, p))
+            boxes.append(box(p))
+            extent.extend([(p[0] - w, p[1] - 0.2 * k), (p[0] + w, p[1] + 0.2 * k)])
+
         lenses = {}  # (ends, name) -> the control points of the two arcs of a shaded loop
-        for kind, data, st, poly, ends, _, dirn, name in self._pieces(pos):
+        for kind, data, st, poly, ends, _, dirn, i in pieces:
+            name = self.edges[i][0]
             if st in ARROWS and dirn is not None:  # one filled head, or two open ones
                 g["arrows" if ARROWS[st] == 1 else "openarrows"] += _heads(poly, dirn, ARROWS[st])
             if st in ARROWS:
@@ -622,32 +830,74 @@ class Diagram(gd.Picture):
             if kind == "line":
                 a, b = data
                 g["int"].append((a, b, st))
+                d = gd._unit(a, b)
+                n = (-d[1], d[0])
+                mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                sgn = _side(n, (mid[0] - cen[0], mid[1] - cen[1]))  # away from the centre first
+                at = [
+                    (mid[0] + s * n[0], mid[1] + s * n[1])
+                    for s in (x * k * sgn for x in (0.22, -0.22, 0.56, -0.56, 0.9, -0.9))
+                ]
             elif kind == "arc":
                 a, c, b = data
                 g["bubble"].append((a, c, b, st))
-                extent.append(
-                    ((a[0] + 2 * c[0] + b[0]) / 4, (a[1] + 2 * c[1] + b[1]) / 4)
-                )
+                m = ((a[0] + 2 * c[0] + b[0]) / 4, (a[1] + 2 * c[1] + b[1]) / 4)
+                extent.append(m)
                 if name in POLAR_SHADED:
                     lenses.setdefault((ends, name), []).append(c)
+                d = gd._unit(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), m)  # outwards first
+                at = [
+                    (m[0] + s * d[0], m[1] + s * d[1])
+                    for s in (x * k for x in (0.2, -0.2, 0.54, -0.54, 0.88, -0.88))
+                ]
             elif kind == "ring":
                 g["arc"].append(data + (st,))
                 extent += poly
+                c, r, t0, t1 = data
+                tm = (t0 + t1) / 2
+                at = [
+                    (c[0] + (r + s) * math.cos(tm), c[1] + (r + s) * math.sin(tm))
+                    for s in (x * k for x in (0.22, -0.22, 0.56, -0.56, 0.9, -0.9))
+                ]
             else:
                 c, r = data
                 g["loop"].append((c, r, st))
                 extent += [(c[0] - r, c[1] - r), (c[0] + r, c[1] + r)]
+                d = gd._unit(ends[0], c)
+                at = [(c[0] + (r + s) * d[0], c[1] + (r + s) * d[1]) for s in (0.2 * k, 0.54 * k)]
+            if i in energy and name not in POLAR_SHADED:  # not the lines inside a shaded loop
+                on_chain = name in FERMIONS and frozenset(self.edges[i][1:3]) in steps
+                wanted.append((1 if on_chain else 0, i, at, i))  # the wide chain labels after the rest
         for ((a, b), name), cs in lenses.items():
             if len(cs) == 2:  # the symmetric lens (a loop sharing its vertices with another line is not one)
                 g["lens"].append((a, cs[0], b, cs[1], self.styles.get(name, FILLS[0])))
-        for a, b in self._legs(pos):
+        keys = (["in"] if self.vin is not None else []) + (["out"] if self.vout is not None else [])
+        for (a, b), key in zip(legs, keys):
             g["straight"].append((a, b))
             g["arrows"].append((((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), (1.0, 0.0)))
             extent += [a, b]
+            if key in energy:
+                w = gd.label_width(energy[key].tex(), self.font_units()) / 2
+                x1 = a[0] + 0.25 if key == "in" else b[0] - 0.25  # towards the open end
+                x2 = b[0] - 0.3 - w if key == "in" else a[0] + 0.3 + w  # or beyond the vertex
+                at = [(x, a[1] + s * k) for s in (0.22, -0.22) for x in (x1, x2)]
+                wanted.append((2, key, at + [(x1, a[1] + s * k) for s in (0.56, -0.56)], None))
         for v, st in self.markers.items():
             p = P(v)
             g["marker"].append((p, st))
             extent += [(p[0] - 0.2, p[1] - 0.2), (p[0] + 0.2, p[1] + 0.2)]
+            if ("field", v) in energy:
+                d = (0.0, -1.0) if p[1] >= top - 1e-9 else _away(p, cen)  # below the top row
+                n = (-d[1], d[0])
+                at = []
+                for s in (0.32 * k, -0.32 * k):  # beside the cross, then diagonally, then further out
+                    at.append((p[0] + s * d[0], p[1] + s * d[1]))
+                    for t in (0.45 * k, -0.45 * k):
+                        at.append((p[0] + 0.7 * s * d[0] + t * n[0], p[1] + 0.7 * s * d[1] + t * n[1]))
+                at += [(p[0] + s * d[0], p[1] + s * d[1]) for s in (0.66 * k, -0.66 * k)]
+                wanted.append((3, ("field", v), at, None))
+        for _, key, at, me in sorted(wanted, key=lambda r: r[0]):
+            label(key, at, me)
         xs = [p[0] for p in extent]
         ys = [p[1] for p in extent]
         g["bbox"] = [
@@ -658,16 +908,76 @@ class Diagram(gd.Picture):
         ]
         return g
 
-
 def diagram(term, **kw):
     """the Feynman diagram of a term (string or list of tuples); keywords: styles, ext, pad, straight,
-    curved, vertical"""
+    curved, vertical, energies, scale (pixels per unit), font (label size in points)"""
     return term if isinstance(term, Diagram) else Diagram(term, **kw).layout()
 
 
-def grid(terms, ncols=3, scale=40.0, gap=6.0, **kw):
-    """several diagrams side by side (inline in Jupyter; .tikz(), .save('x.svg'/'x.pdf'/'x.tikz'/'x.tex'))"""
-    return gd.Grid([diagram(t, **kw) for t in terms], ncols=ncols, scale=scale, gap=gap)
+def grid(terms, ncols=3, scale=None, gap=6.0, **kw):
+    """several diagrams side by side (inline in Jupyter; .tikz(), .save('x.svg'/'x.pdf'/'x.tikz'/'x.tex'));
+    keywords as for diagram()"""
+    return gd.Grid([diagram(t, scale=scale, **kw) for t in terms], ncols=ncols, scale=scale, gap=gap)
+
+
+# ----------------------------------------------------------------------------------------------
+# energies
+# ----------------------------------------------------------------------------------------------
+class Energy:
+    """a linear combination of energy symbols, {symbol: coefficient}: symbol ('eps', 'v') is
+    eps_v, ('eps', "'") a loop energy eps', ('omega', 'T') the energy of the field T, ('omega', '')
+    or ('omega', '1') that of an interaction line.  tex() writes it with gd.EPS and gd.OMEGA, the
+    valence energy first, then the loop energies, the fields, the interaction lines"""
+
+    def __init__(self, terms=None):
+        self.t = {k: v for k, v in (terms or {}).items() if v}
+
+    def __add__(self, other):
+        t = dict(self.t)
+        for k, v in other.t.items():
+            t[k] = t.get(k, 0) + v
+        return Energy(t)
+
+    def __neg__(self):
+        return Energy({k: -v for k, v in self.t.items()})
+
+    def __sub__(self, other):
+        return self + (-other)
+
+    def __mul__(self, c):
+        return Energy({k: v * c for k, v in self.t.items()})
+
+    def symbols(self):
+        return sorted(self.t, key=_sym_key)
+
+    def leading(self):
+        """the coefficient of the first symbol written (0 when there is none)"""
+        return self.t[self.symbols()[0]] if self.t else 0
+
+    def tex(self):
+        out = ""
+        for sym in self.symbols():
+            c = self.t[sym]
+            mag = abs(c)
+            coef = "" if mag == 1 else str(mag) if mag.denominator == 1 else "\\tfrac{%d}{%d}" % (mag.numerator, mag.denominator)
+            out += ("-" if c < 0 else "+" if out else "") + coef + _sym_tex(sym)
+        return out or "0"
+
+    def __repr__(self):
+        return "Energy(%s)" % self.tex()
+
+
+def _sym_key(sym):
+    kind, sub = sym
+    return (kind != "eps", 0 if sub[:1].isalpha() else 2 if sub.isdigit() else 1, sub)
+
+
+def _sym_tex(sym):
+    kind, sub = sym
+    base = gd.EPS if kind == "eps" else gd.OMEGA
+    if not sub:
+        return base
+    return base + sub if set(sub) == {"'"} else base + "_{%s}" % sub
 
 
 # ----------------------------------------------------------------------------------------------
