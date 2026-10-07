@@ -23,6 +23,8 @@ vertex, any label will do.  The factors are
     X(1,2)       a second Coulomb-type line, double wavy (a screened or effective interaction): laid out
                  like Q, with the same variants Xs, Xu, Xd
     PI(1,2)      polarisation loop = G(1,2) G(2,1): two solid arcs (a bubble); also Pi, \\Pi
+    PIH(1,2)     the shaded (full) polarisation loop: the bubble of PI, hatched inside; also PiH, \\PiH.
+                 styles={'PIH': 'shaded'} fills it grey instead, 'crosshatched' hatches it both ways
     v(1), w(2)   external lines (names v w x y): solid with an arrow.  The first one written comes in
                  at the top left, the second goes out at the right; at most one of each
     T(1)         any other name with one label: a marker at that vertex (a cross; styles={'T': 'dot'})
@@ -59,12 +61,16 @@ COULOMB_DOWN = tuple(n + "d" for n in COULOMB)  # Qd, Xd: ... downwards (to the 
 COULOMBS = tuple(COULOMB) + COULOMB_STRAIGHT + COULOMB_UP + COULOMB_DOWN
 ARROWS = {"arrow": 1, "arrows": 2}  # line styles drawn solid with one filled or two open arrowheads at the middle
 POLAR = ("PI", "Pi", "\\Pi")  # names of the polarisation loop
+POLAR_SHADED = ("PIH", "PiH", "\\PiH")  # ... of the shaded (full) polarisation loop: the bubble, filled inside
+POLARS = POLAR + POLAR_SHADED
+FILLS = ("hatched", "crosshatched", "shaded")  # fills of a shaded loop (its styles entry), hatched by default
 STYLES = {
     GREEN: "solid",
     "Gex": "arrows",
     "Pa": "double",
     **{n + sfx: st for n, st in COULOMB.items() for sfx in ("", "s", "u", "d")},
-}  # name -> line style (two labels) or marker (one label)
+    **{n: FILLS[0] for n in POLAR_SHADED},
+}  # name -> line style (two labels), marker (one label) or fill (shaded loop)
 
 _F_RE = re.compile(
     r"(\\?[A-Za-z]+)\s*\(\s*([A-Za-z0-9]+)\s*(?:,\s*([A-Za-z0-9]+)\s*)?\)"
@@ -116,8 +122,10 @@ class Diagram(gd.Picture):
                     self.ext.append((name, labels[0]))
                 else:
                     self.markers[labels[0]] = self.styles.get(name, gd.DEFAULT_MARKER)
-            elif name in POLAR:
-                st = self.styles.get(name, self.styles.get(GREEN, "solid"))
+            elif name in POLARS:  # two arcs, in the style of G (the styles entry of a shaded loop is its fill)
+                st = self.styles.get(GREEN, "solid")
+                if name in POLAR:
+                    st = self.styles.get(name, st)
                 self.edges += [(name, labels[0], labels[1], st)] * 2
             else:
                 st = self.styles.get(name, gd.DEFAULT_STYLE)
@@ -141,13 +149,13 @@ class Diagram(gd.Picture):
     # hold only some of the vertices while the layout is being built
     # ------------------------------------------------------------------------------------------
     def _pieces(self, pos):
-        """[(kind, data, style, points, ends, bent, dirn)]: kind/data = line (a, b) | arc (a, c, b), a
+        """[(kind, data, style, points, ends, bent, dirn, name)]: kind/data = line (a, b) | arc (a, c, b), a
         Bezier arc with control point c | ring (c, r, t0, t1), a circular arc of a round loop |
         loop (c, r), a line from a vertex to itself; points approximate the line (for the crossing
         tests); ends are the vertex positions it is attached to; bent is the cost of a line that
         does not run straight because a vertex is in the way (100 for a fermion line, which should
         never bend, 8 otherwise); dirn = (position of the first label, of the second), None for a loop at
-        one vertex"""
+        one vertex; name is the name of the line"""
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         pts = [P(v) for v in self.vertices if v in pos]
         cen = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
@@ -179,6 +187,7 @@ class Diagram(gd.Picture):
                             (p,),
                             0,
                             None,
+                            name,
                         )
                     )
                 continue
@@ -209,7 +218,7 @@ class Diagram(gd.Picture):
                     c, poly = _arc(
                         a, b, mid, n, side * abs(k) * h if forced else far * k * h
                     )
-                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn))
+                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn, name))
                     continue
                 through = _hits(
                     [a, b], pts, (a, b)
@@ -226,6 +235,7 @@ class Diagram(gd.Picture):
                             (a, b),
                             100 if through else 0,
                             dirn,
+                            name,
                         )
                     )
                 elif (
@@ -246,6 +256,7 @@ class Diagram(gd.Picture):
                             (a, b),
                             100 if name in FERMIONS else 8,
                             dirn,
+                            name,
                         )
                     )
                 elif m == 1 and (
@@ -254,9 +265,9 @@ class Diagram(gd.Picture):
                     c, poly = _arc(
                         a, b, mid, n, side * min(max(0.4 * gd._dist(a, b), 0.35), 0.7)
                     )
-                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn))
+                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn, name))
                 else:
-                    out.append(("line", (a, b), st, [a, b], (a, b), 0, dirn))
+                    out.append(("line", (a, b), st, [a, b], (a, b), 0, dirn, name))
         return out
 
     def _rings(self, pos, P):
@@ -318,16 +329,16 @@ class Diagram(gd.Picture):
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         pts = [P(v) for v in self.vertices if v in pos]
         pieces = self._pieces(pos) + [
-            ("leg", ab, "solid", list(ab), (ab[0] if ab[0] in pts else ab[1],), 0, None)
+            ("leg", ab, "solid", list(ab), (ab[0] if ab[0] in pts else ab[1],), 0, None, None)
             for ab in self._legs(pos)
         ]
         bad = cross = bent = touch = 0
-        for _, _, _, poly, ends, b, _ in pieces:
+        for _, _, _, poly, ends, b, _, _ in pieces:
             bad += _hits(poly, pts, ends)
             bent += b
         segs = [
             [(poly[i], poly[i + 1]) for i in range(len(poly) - 1)]
-            for _, _, _, poly, _, _, _ in pieces
+            for _, _, _, poly, _, _, _, _ in pieces
         ]
         box = [
             (
@@ -336,9 +347,9 @@ class Diagram(gd.Picture):
                 max(p[0] for p in poly),
                 max(p[1] for p in poly),
             )
-            for _, _, _, poly, _, _, _ in pieces
+            for _, _, _, poly, _, _, _, _ in pieces
         ]
-        ends_of = [set(e) for _, _, _, _, e, _, _ in pieces]
+        ends_of = [set(e) for _, _, _, _, e, _, _, _ in pieces]
         for i in range(len(segs)):
             for j in range(i + 1, len(segs)):
                 if (
@@ -390,7 +401,7 @@ class Diagram(gd.Picture):
             bends += (
                 0.75 if dx == dy else 2.5 * (dx != 0 and dy != 0)
             )  # diagonal, or any other angle
-            tilted += dy != 0 and any(nm in POLAR for nm in names)  # bubbles lie flat
+            tilted += dy != 0 and any(nm in POLARS for nm in names)  # bubbles lie flat
             askew += (
                 dx != 0 and dy != 0 and not names.isdisjoint(COULOMBS)
             )  # Coulomb lines run along an axis
@@ -595,13 +606,15 @@ class Diagram(gd.Picture):
                 "bubble",
                 "arc",
                 "loop",
+                "lens",
                 "labels",
                 "arrows",
                 "openarrows",
             )
         }
         extent = [P(v) for v in self.vertices]
-        for kind, data, st, poly, _, _, dirn in self._pieces(pos):
+        lenses = {}  # (ends, name) -> the control points of the two arcs of a shaded loop
+        for kind, data, st, poly, ends, _, dirn, name in self._pieces(pos):
             if st in ARROWS and dirn is not None:  # one filled head, or two open ones
                 g["arrows" if ARROWS[st] == 1 else "openarrows"] += _heads(poly, dirn, ARROWS[st])
             if st in ARROWS:
@@ -615,6 +628,8 @@ class Diagram(gd.Picture):
                 extent.append(
                     ((a[0] + 2 * c[0] + b[0]) / 4, (a[1] + 2 * c[1] + b[1]) / 4)
                 )
+                if name in POLAR_SHADED:
+                    lenses.setdefault((ends, name), []).append(c)
             elif kind == "ring":
                 g["arc"].append(data + (st,))
                 extent += poly
@@ -622,6 +637,9 @@ class Diagram(gd.Picture):
                 c, r = data
                 g["loop"].append((c, r, st))
                 extent += [(c[0] - r, c[1] - r), (c[0] + r, c[1] + r)]
+        for ((a, b), name), cs in lenses.items():
+            if len(cs) == 2:  # the symmetric lens (a loop sharing its vertices with another line is not one)
+                g["lens"].append((a, cs[0], b, cs[1], self.styles.get(name, FILLS[0])))
         for a, b in self._legs(pos):
             g["straight"].append((a, b))
             g["arrows"].append((((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), (1.0, 0.0)))

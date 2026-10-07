@@ -127,6 +127,7 @@ A factor is `name(label)` or `name(label,label)`; the labels name the vertices, 
 * `Q(1,2)`: Coulomb line, wavy, drawn as a gentle arc; `Qs(1,2)` is a straight one (`curved=False` straightens them all). `Qu(1,2)` and `Qd(1,2)` bend up or down (left or right for a vertical line) when the automatic side is not what you want. Its ends need not touch anything else: `Q(1,2) T(2)` is a line to an external potential.
 * `X(1,2)`: a second Coulomb-type line, double wavy (a screened or effective interaction, say), laid out like `Q`; `Xs`, `Xu` and `Xd` as for `Q`.
 * `PI(1,2)` (also `Pi`, `\Pi`): polarisation loop, `G(1,2) G(2,1)`, drawn as two arcs that never overlap.
+* `PIH(1,2)` (also `PiH`, `\PiH`): the full polarisation operator, the same bubble shaded inside: hatched by default, `styles={'PIH': 'shaded'}` fills it grey, `'crosshatched'` hatches it both ways.
 * `v(1)`, `w(2)` (names `v w x y`): external lines, with arrows. The first one written enters at the top left, the second leaves at the right; at most one of each.
 * Any other name with one label, `T(1)`, is a marker at that vertex (a cross by default); with two labels, `S(1,2)`, a dashed line. `styles={'T': 'dot', 'S': 'dotted', 'G': 'double'}` changes them, as for Goldstone diagrams. Two more line styles exist here: `arrow` and `arrows`, a solid line with one filled or two open arrowheads at its middle, pointing from the first label to the second.
 

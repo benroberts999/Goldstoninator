@@ -153,6 +153,8 @@ class Picture:
         bubble   [(a, c, b, style)]  quadratic Bezier arc a -- b with control point c
         loop     [(c, r, style)]     circle of radius r about c
         arc      [(c, r, t0, t1, style)]  circular arc about c, counterclockwise from angle t0 to t1
+        lens     [(a, c1, b, c2, fill)]  the region between the arcs a -- b with control points c1 and c2,
+                                     filled: hatched, crosshatched or shaded (grey); drawn under the lines
         straight [(a, b)]            plain solid line (the external legs)
         marker   [(p, style)]        x (cross), dot, circle or square at p
         arrows   [(p, d)]            arrowhead at p pointing along the unit vector d
@@ -189,6 +191,18 @@ class Picture:
             % " ".join("%.1f,%.1f" % T(p) for p in pts)
         )
         el = []
+        for a, c1, b, c2, fill in g.get("lens", []):  # under everything else
+            if fill == "shaded":
+                el.append(
+                    '<path d="M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f Q%.1f,%.1f %.1f,%.1f Z" fill="#%s" stroke="none"/>'
+                    % (T(a) + T(c1) + T(b) + T(c2) + T(a) + ("%02x" % round(255 * _GREY) * 3,))
+                )
+            else:
+                for p, q in _lens_hatch(a, c1, b, c2, fill):
+                    el.append(
+                        '<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="black" stroke-width="0.7"/>'
+                        % (T(p) + T(q))
+                    )
         for a, b, style in g["int"]:
             if style == "wavy":
                 el.append(poly(_wave(a, b)))
@@ -316,6 +330,21 @@ class Picture:
         dashed = lambda cmd, style: (
             "%s %s [] 0 d 0 J" % (_PDF_DASH[style], cmd) if style in _PDF_DASH else cmd
         )
+        for a, c1, b, c2, fill in g.get("lens", []):  # under everything else
+            if fill == "shaded":
+                q1, q2 = _q2c(a, c1, b)
+                q3, q4 = _q2c(b, c2, a)
+                el.append(
+                    "%.2f g %s m %s %s %s c %s %s %s c f 0 g"
+                    % (_GREY, f(a), f(q1), f(q2), f(b), f(q3), f(q4), f(a))
+                )
+            else:
+                segs = _lens_hatch(a, c1, b, c2, fill)
+                if segs:
+                    el.append(
+                        "0.7 w %s S 1.2 w"
+                        % " ".join("%s m %s l" % (f(p), f(q)) for p, q in segs)
+                    )
         for a, b, style in g["int"]:
             if style == "wavy":
                 el.append(poly(_wave(a, b)))
@@ -354,8 +383,7 @@ class Picture:
                 for sgn in (1, -1):
                     el.append(poly(_offset_pts(*_bezier(a, c, b), DOUBLE * sgn)))
             else:
-                c1 = (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1]))
-                c2 = (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1]))
+                c1, c2 = _q2c(a, c, b)
                 el.append(
                     dashed("%s m %s %s %s c S" % (f(a), f(c1), f(c2), f(b)), style)
                 )
@@ -410,6 +438,21 @@ class Picture:
         g = self._geometry()
         C = lambda p: "(%s,%s)" % (_num(p[0]), _num(p[1]))
         el = []
+        for a, c1, b, c2, fill in g.get("lens", []):  # under everything else
+            if fill == "shaded":
+                q1, q2 = _q2c(a, c1, b)
+                q3, q4 = _q2c(b, c2, a)
+                el.append(
+                    "\\fill[black!%d] %s .. controls %s and %s .. %s .. controls %s and %s .. %s -- cycle;"
+                    % (round(100 * (1 - _GREY)), C(a), C(q1), C(q2), C(b), C(q3), C(q4), C(a))
+                )
+            else:
+                segs = _lens_hatch(a, c1, b, c2, fill)
+                if segs:
+                    el.append(
+                        "\\draw[line width=%spt] %s;"
+                        % (_num(0.5 * unit), " ".join("%s -- %s" % (C(p), C(q)) for p, q in segs))
+                    )
         for a, b, style in g["int"]:
             el.append("\\draw%s %s -- %s;" % (_tikz_opt(style, unit), C(a), C(b)))
         for p, style in g["marker"]:
@@ -437,8 +480,7 @@ class Picture:
         for a, b in g["straight"]:
             el.append("\\draw %s -- %s;" % (C(a), C(b)))
         for a, c, b, style in g["bubble"]:  # quadratic -> cubic Bezier
-            c1 = (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1]))
-            c2 = (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1]))
+            c1, c2 = _q2c(a, c, b)
             el.append(
                 "\\draw%s %s .. controls %s and %s .. %s;"
                 % (_tikz_opt(style, unit), C(a), C(c1), C(c2), C(b))
@@ -1322,6 +1364,7 @@ _SVG_DASH = {
     "dotted": ' stroke-dasharray="1.5,3.5" stroke-linecap="round"',
 }
 _PDF_DASH = {"dashed": "[6 4] 0 d", "dotted": "[0.1 3.5] 0 d 1 J"}
+_GREY = 0.85  # the grey level of a shaded lens (0 black, 1 white)
 
 
 def _tikz_opt(style, unit):
@@ -1347,6 +1390,47 @@ def canon_styles(styles):
         k: v.replace("-", "").replace(" ", "").lower() if isinstance(v, str) else v
         for k, v in (styles or {}).items()
     }
+
+
+def _q2c(a, c, b):
+    """the two control points of the cubic Bezier curve equal to the quadratic one a -> b with control point c"""
+    return (
+        (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1])),
+        (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1])),
+    )
+
+
+def _hatch(poly, spacing=0.1, angle=45.0):
+    """the segments [(p, q)] of the parallel lines at the given angle (degrees), spacing apart (in
+    absolute position, so adjacent regions hatch in phase), that lie inside the closed polygon poly"""
+    d = (math.cos(math.radians(angle)), math.sin(math.radians(angle)))
+    n = (-d[1], d[0])
+    s = [p[0] * n[0] + p[1] * n[1] for p in poly]  # across the lines
+    t = [p[0] * d[0] + p[1] * d[1] for p in poly]  # along them
+    out = []
+    for k in range(math.floor(min(s) / spacing) + 1, math.ceil(max(s) / spacing)):
+        s0 = k * spacing
+        cross = sorted(
+            t[i] + (s0 - s[i]) / (s[j] - s[i]) * (t[j] - t[i])
+            for i, j in zip(range(len(poly)), list(range(1, len(poly))) + [0])
+            if (s[i] < s0) != (s[j] < s0)
+        )
+        for t0, t1 in zip(cross[::2], cross[1::2]):
+            out.append(
+                (
+                    (s0 * n[0] + t0 * d[0], s0 * n[1] + t0 * d[1]),
+                    (s0 * n[0] + t1 * d[0], s0 * n[1] + t1 * d[1]),
+                )
+            )
+    return out
+
+
+def _lens_hatch(a, c1, b, c2, fill, spacing=0.1):
+    """the hatching of the lens between the arcs a -> b with control points c1 and c2: lines at 45
+    degrees, or both ways when fill is crosshatched"""
+    poly = _bezier(a, c1, b, 60)[0] + _bezier(b, c2, a, 60)[0]
+    angles = (45.0, -45.0) if fill == "crosshatched" else (45.0,)
+    return [seg for ang in angles for seg in _hatch(poly, spacing, ang)]
 
 
 def _bezier(a, c, b, npts=120):
