@@ -1,30 +1,33 @@
 # Goldstoninator
 
-Goldstone (time-ordered) diagrams, energy denominators and signs from the numerator of a many-body perturbation theory term.
-One file, `goldstone_draw.py`, standard library only. `goldstone_draw.ipynb` is a worked tour.
+* Constructs Goldstone diagrams from any (valid) chain of one- and two-body integrals.
+* Uses Goldstone rules to also construct pertrubation term, including sign and energy denominators
+* Can export diagrams as images, or as tikz source code
+* Can also parse the pertrubation term into LaTeX 
+
 
 ## Setup
 
-The module needs only Python 3. Jupyter is needed for the notebook:
+The module needs Python 3, Jupyter is needed for the notebook.
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-jupyter lab goldstone_draw.ipynb      # or open it in VS Code and pick the .venv kernel
 ```
 
-To use the module elsewhere, copy `goldstone_draw.py` next to your script or notebook (or add this directory to `sys.path`).
 
-## Example, in four steps
+## Quick examples
 
 **1. Write the term and show the diagram.** A term is a product of integrals; `t_rm` is a one-body vertex, drawn here as a cross:
 
 ```python
-import goldstone_draw as gd
+import goldstoninator as gd
 
+## Create the diagram:
 example = gd.diagram("g_vbrs g_asnb t_rm g_mnva", styles={"t": "cross"})
-example            # as the last line of a Jupyter cell: the picture, inline
+
+## Display it as image in a notebook:
+display(example)
 ```
 
 ![example](example.svg)
@@ -32,8 +35,9 @@ example            # as the last line of a Jupyter cell: the picture, inline
 **2. Export the picture**, as a file or straight to TikZ:
 
 ```python
-example.save("example.pdf")       # also .svg
-example.save("example.tikz")      # a tikzpicture, to \input
+example.save("example.pdf")       # pdf output
+example.save("example.svg")       # or .svg
+example.save("example.tikz")      # tikz source code
 example.save("example.tex")       # a standalone document for pdflatex
 print(example.tikz())             # or just the TikZ source
 ```
@@ -69,8 +73,8 @@ Integrals are written as `g_vbms`, `g_{vbms}`, `g[v,b,m,s]`, or as a list of tup
 
 * Two-body `g_pqrs` = ⟨pq|g|rs⟩: electron r → p and s → q, drawn as a vertical interaction line.
 * One-body `h_pr` = ⟨p|h|r⟩: a single vertex (marker), e.g. an external field.
-* Letters: core (holes) `a b c d e f`, excited (particles) `m n r s p q t u`, valence `v w`.
-  Change them with `core=`, `exc=`, `val=`, or `types=dict(x='core')`.
+* Letters: core (holes) `a b c d e f`, valence `v w x y`; every other letter is excited (a particle).
+  Change them with `core=`, `val=`, `exc=`, or `types=dict(x='core')`.
 * Antisymmetrised integrals are not accepted: expand g̃_pqrs = g_pqrs − g_pqsr first.
 * Integrals written in the opposite convention (`g_rspq`) are detected: the reading with the fewest flipped integrals is used.
 
