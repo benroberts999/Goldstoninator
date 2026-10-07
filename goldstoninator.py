@@ -45,6 +45,7 @@ Usage (see goldstoninator.ipynb):
     gd.diagram('h_na g_wavn')                   # one-body vertex h absorbs omega_h: (eps_a - eps_n + omega_h)
     gd.diagram('h_na g_wavn', omega=False)      # static field: no omega (then eps_w is kept where it occurs)
     gd.diagram('h_na S_wavn', omega={'h': r'\\omega', 'S': True})   # symbol per name; True: omega_{name}
+    gd.diagram('g_vamn g_mnva', labels=False)   # the picture without the orbital labels
 No dependencies beyond the standard library.
 
 Letter classes (override with core='abcd', val='v', exc='...' or types=dict(a='core', ...)):
@@ -52,6 +53,9 @@ Letter classes (override with core='abcd', val='v', exc='...' or types=dict(a='c
 Line styles for two-body names: wavy (default for g), dashed (default otherwise), dotted, double, solid.
 Markers for one-body names: x (default; 'cross' is the same), dot, circle, square.
 Energy symbols in tex(): EPS (orbital energies) and OMEGA (absorbed energies, subscripted by the name).
+
+feynmanator.py draws Feynman diagrams (G, Q and polarisation lines, external legs) with the drawing
+code of this file (class Picture).
 """
 
 import itertools
@@ -136,9 +140,285 @@ def _types(types=None, core=CORE, exc=EXC, val=VAL):
 
 
 # ----------------------------------------------------------------------------------------------
+# picture: SVG, PDF and TikZ output of a geometry; base of Diagram here and in feynmanator.py
+# ----------------------------------------------------------------------------------------------
+class Picture:
+    """A drawing built from the primitives of self._geometry(), a dict (diagram units, y up):
+        int      [(a, b, style)]     straight line a -- b; style wavy, dashed, dotted, double or solid
+        bubble   [(a, c, b, style)]  quadratic Bezier arc a -- b with control point c
+        loop     [(c, r, style)]     circle of radius r about c
+        straight [(a, b)]            plain solid line (the external legs)
+        marker   [(p, style)]        x (cross), dot, circle or square at p
+        arrows   [(p, d)]            arrowhead at p pointing along the unit vector d
+        labels   [(text, p)]         italic label centred at p
+        bbox     [x0, y0, x1, y1]
+    svg(), pdf(), tikz() and save() draw it; _repr_svg_ shows it inline in Jupyter."""
+
+    def _geometry(self):
+        raise NotImplementedError
+
+    def _term_str(self) -> str:
+        return ""
+
+    def size(self, scale=40.0):
+        x0, y0, x1, y1 = self._geometry()["bbox"]
+        return (x1 - x0) * scale, (y1 - y0) * scale
+
+    # ------------------------------------------------------------------------------------------
+    # SVG
+    # ------------------------------------------------------------------------------------------
+    def svg_body(self, scale=40.0, ox=0.0, oy=0.0):
+        g = self._geometry()
+        x0, y0, x1, y1 = g["bbox"]
+        T = lambda p: (
+            ox + (p[0] - x0) * scale,
+            oy + (y1 - p[1]) * scale,
+        )  # y up -> svg y down
+        line = (
+            lambda a, b, extra="": '<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="black" stroke-width="1.2"%s/>'
+            % (T(a) + T(b) + (extra,))
+        )
+        el = []
+        for a, b, style in g["int"]:
+            if style == "wavy":
+                el.append(
+                    '<polyline fill="none" stroke="black" stroke-width="1.2" points="%s"/>'
+                    % " ".join("%.1f,%.1f" % T(p) for p in _wave(a, b))
+                )
+            elif style == "double":
+                for sgn in (1, -1):
+                    el.append(line(*_offset(a, b, 0.045 * sgn)))
+            else:
+                el.append(line(a, b, _SVG_DASH.get(style, "")))
+        for p, style in g["marker"]:
+            px, py = T(p)
+            r = 0.11 * scale
+            if style == "dot":
+                el.append(
+                    '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="black"/>'
+                    % (px, py, 0.7 * r)
+                )
+            elif style == "circle":
+                el.append(
+                    '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="white" stroke="black" stroke-width="1.2"/>'
+                    % (px, py, r)
+                )
+            elif style == "square":
+                el.append(
+                    '<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="white" stroke="black" stroke-width="1.2"/>'
+                    % (px - r, py - r, 2 * r, 2 * r)
+                )
+            else:
+                el.append(
+                    '<path d="M%.1f,%.1f L%.1f,%.1f M%.1f,%.1f L%.1f,%.1f" stroke="black" stroke-width="1.4"/>'
+                    % (px - r, py - r, px + r, py + r, px - r, py + r, px + r, py - r)
+                )
+        for a, b in g["straight"]:
+            el.append(line(a, b))
+        poly = (
+            lambda pts: '<polyline fill="none" stroke="black" stroke-width="1.2" points="%s"/>'
+            % " ".join("%.1f,%.1f" % T(p) for p in pts)
+        )
+        for a, c, b, style in g["bubble"]:
+            if style == "wavy":
+                el.append(poly(_wavy(*_bezier(a, c, b))))
+            elif style == "double":
+                for sgn in (1, -1):
+                    el.append(poly(_offset_pts(*_bezier(a, c, b), 0.045 * sgn)))
+            else:
+                el.append(
+                    '<path d="M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f" fill="none" stroke="black" stroke-width="1.2"%s/>'
+                    % (T(a) + T(c) + T(b) + (_SVG_DASH.get(style, ""),))
+                )
+        for c, r, style in g["loop"]:
+            if style == "wavy":
+                el.append(poly(_wavy(*_circle(c, r))))
+            elif style == "double":
+                for sgn in (1, -1):
+                    el.append(
+                        '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="black" stroke-width="1.2"/>'
+                        % (T(c) + ((r + 0.045 * sgn) * scale,))
+                    )
+            else:
+                el.append(
+                    '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="black" stroke-width="1.2"%s/>'
+                    % (T(c) + (r * scale, _SVG_DASH.get(style, "")))
+                )
+        for p, d in g["arrows"]:
+            el.append(
+                '<polygon fill="black" points="%s"/>'
+                % " ".join("%.1f,%.1f" % T(q) for q in _arrowhead(p, d))
+            )
+        for lab, p in g["labels"]:
+            el.append(
+                '<text x="%.1f" y="%.1f" font-family="serif" font-style="italic" font-size="%.0f" '
+                'text-anchor="middle" dominant-baseline="middle">%s</text>'
+                % (T(p) + (0.4 * scale, lab))
+            )
+        return "\n".join(el)
+
+    def svg(self, scale=40.0):
+        W, H = self.size(scale)
+        return _svg_wrap(self.svg_body(scale), W, H)
+
+    def _repr_svg_(self):
+        return self.svg()
+
+    # ------------------------------------------------------------------------------------------
+    # PDF (written directly; vector graphics, Times-Italic labels)
+    # ------------------------------------------------------------------------------------------
+    def pdf_body(self, scale=40.0, ox=0.0, oy=0.0):
+        g = self._geometry()
+        x0, y0, x1, y1 = g["bbox"]
+        T = lambda p: (ox + (p[0] - x0) * scale, oy + (p[1] - y0) * scale)
+        f = lambda p: "%.2f %.2f" % T(p)
+        el = ["1.2 w 0 J 0 j"]
+        poly = lambda pts: "%s m %s S" % (
+            f(pts[0]),
+            " ".join(f(p) + " l" for p in pts[1:]),
+        )
+        dashed = lambda cmd, style: (
+            "%s %s [] 0 d 0 J" % (_PDF_DASH[style], cmd) if style in _PDF_DASH else cmd
+        )
+        for a, b, style in g["int"]:
+            if style == "wavy":
+                pts = _wave(a, b)
+                el.append(
+                    "%s m %s S" % (f(pts[0]), " ".join(f(p) + " l" for p in pts[1:]))
+                )
+            elif style == "double":
+                for sgn in (1, -1):
+                    a2, b2 = _offset(a, b, 0.045 * sgn)
+                    el.append("%s m %s l S" % (f(a2), f(b2)))
+            else:
+                el.append(dashed("%s m %s l S" % (f(a), f(b)), style))
+        for p, style in g["marker"]:
+            px, py = T(p)
+            r = 0.11 * scale
+            if style == "dot":
+                el.append(_pdf_circle(px, py, 0.7 * r) + " f")
+            elif style == "circle":
+                el.append(_pdf_circle(px, py, r) + " S")
+            elif style == "square":
+                el.append("%.2f %.2f %.2f %.2f re S" % (px - r, py - r, 2 * r, 2 * r))
+            else:
+                el.append(
+                    "1.4 w %.2f %.2f m %.2f %.2f l %.2f %.2f m %.2f %.2f l S 1.2 w"
+                    % (px - r, py - r, px + r, py + r, px - r, py + r, px + r, py - r)
+                )
+        for a, b in g["straight"]:
+            el.append("%s m %s l S" % (f(a), f(b)))
+        for a, c, b, style in g["bubble"]:  # quadratic -> cubic Bezier
+            if style == "wavy":
+                el.append(poly(_wavy(*_bezier(a, c, b))))
+            elif style == "double":
+                for sgn in (1, -1):
+                    el.append(poly(_offset_pts(*_bezier(a, c, b), 0.045 * sgn)))
+            else:
+                c1 = (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1]))
+                c2 = (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1]))
+                el.append(
+                    dashed("%s m %s %s %s c S" % (f(a), f(c1), f(c2), f(b)), style)
+                )
+        for c, r, style in g["loop"]:
+            if style == "wavy":
+                el.append(poly(_wavy(*_circle(c, r))))
+            elif style == "double":
+                for sgn in (1, -1):
+                    el.append(_pdf_circle(*T(c), (r + 0.045 * sgn) * scale) + " S")
+            else:
+                el.append(dashed(_pdf_circle(*T(c), r * scale) + " S", style))
+        for p, d in g["arrows"]:
+            q = [T(v) for v in _arrowhead(p, d)]
+            el.append("%.2f %.2f m %.2f %.2f l %.2f %.2f l f" % (q[0] + q[1] + q[2]))
+        fs = 0.4 * scale
+        for lab, p in g["labels"]:
+            px, py = T(p)
+            el.append(
+                "BT /F1 %.1f Tf %.2f %.2f Td (%s) Tj ET"
+                % (fs, px - 0.25 * fs, py - 0.2 * fs, lab)
+            )
+        return "\n".join(el)
+
+    def pdf(self, scale=40.0):
+        W, H = self.size(scale)
+        return _pdf_wrap(self.pdf_body(scale), W, H)
+
+    # ------------------------------------------------------------------------------------------
+    # TikZ (coordinates in diagram units, 1 unit = `unit` cm; the same geometry as the SVG and PDF)
+    # ------------------------------------------------------------------------------------------
+    def tikz_body(self, unit=1.0):
+        """TikZ drawing commands (no tikzpicture environment); wavy lines use the snake decoration of
+        \\usetikzlibrary{decorations.pathmorphing}"""
+        g = self._geometry()
+        C = lambda p: "(%s,%s)" % (_num(p[0]), _num(p[1]))
+        el = []
+        for a, b, style in g["int"]:
+            el.append("\\draw%s %s -- %s;" % (_tikz_opt(style, unit), C(a), C(b)))
+        for p, style in g["marker"]:
+            r = 0.11
+            if style == "dot":
+                el.append("\\fill %s circle (%s);" % (C(p), _num(0.7 * r)))
+            elif style == "circle":
+                el.append("\\draw[fill=white] %s circle (%s);" % (C(p), _num(r)))
+            elif style == "square":
+                el.append(
+                    "\\draw[fill=white] %s rectangle %s;"
+                    % (C((p[0] - r, p[1] - r)), C((p[0] + r, p[1] + r)))
+                )
+            else:
+                el.append(
+                    "\\draw[line width=%spt] %s -- %s %s -- %s;"
+                    % (
+                        _num(unit),
+                        C((p[0] - r, p[1] - r)),
+                        C((p[0] + r, p[1] + r)),
+                        C((p[0] - r, p[1] + r)),
+                        C((p[0] + r, p[1] - r)),
+                    )
+                )
+        for a, b in g["straight"]:
+            el.append("\\draw %s -- %s;" % (C(a), C(b)))
+        for a, c, b, style in g["bubble"]:  # quadratic -> cubic Bezier
+            c1 = (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1]))
+            c2 = (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1]))
+            el.append(
+                "\\draw%s %s .. controls %s and %s .. %s;"
+                % (_tikz_opt(style, unit), C(a), C(c1), C(c2), C(b))
+            )
+        for c, r, style in g["loop"]:
+            el.append(
+                "\\draw%s %s circle (%s);" % (_tikz_opt(style, unit), C(c), _num(r))
+            )
+        for p, d in g["arrows"]:
+            el.append(
+                "\\fill %s -- %s -- %s -- cycle;"
+                % tuple(C(q) for q in _arrowhead(p, d))
+            )
+        for lab, p in g["labels"]:
+            el.append("\\node at %s {$%s$};" % (C(p), lab))
+        return "\n".join(el)
+
+    def tikz(self, unit=1.0, standalone=False):
+        """the picture as TikZ source: a tikzpicture to \\input (1 diagram unit = `unit` cm), or with
+        standalone=True a complete document.  Needs \\usetikzlibrary{decorations.pathmorphing}.
+        """
+        body = "%% %s\n%s\n%s\n\\end{tikzpicture}" % (
+            self._term_str(),
+            _tikz_begin(unit),
+            self.tikz_body(unit),
+        )
+        return _tikz_standalone(body) if standalone else body
+
+    def save(self, path, scale=40.0, unit=1.0):
+        """write .svg, .pdf, .tikz (tikzpicture, to \\input) or .tex (standalone TikZ document)"""
+        return _save(self, path, scale, unit)
+
+
+# ----------------------------------------------------------------------------------------------
 # diagram: orientation, time order, lines, denominators
 # ----------------------------------------------------------------------------------------------
-class Diagram:
+class Diagram(Picture):
     """Attributes: verts (out1, out2, in1, in2) with out2 = in2 = None for a one-body vertex; vertex k
     has ends (k,0) and, for two-body, (k,1); names; flips; order (earliest first); level[k];
     lines [(label, 'exc'|'core', src_end, dst_end)]; vin, vout (label, end); x[end] = row after layout;
@@ -161,12 +441,14 @@ class Diagram:
         styles=None,
         pad=0.35,
         omega=True,
+        labels=True,
     ):
         self.names, self.gs = parse_term(term)
         self.styles = dict(STYLES)
         self.styles.update(styles or {})
         self.pad = pad
         self.omega = omega
+        self.labels = labels
         self.types = _types(types, core, exc, val)
         for x in {x for g in self.gs for x in g}:
             self.types.setdefault(x, "exc")  # any other letter is excited
@@ -501,6 +783,14 @@ class Diagram:
             "arrows": [],
         }
         extent = []
+
+        def label(
+            text, p, *room
+        ):  # a label at p, with the room it takes (only when labels are on)
+            if self.labels:
+                g["labels"].append((text, p))
+                extent.extend(room or (p,))
+
         for k, v in enumerate(self.verts):
             if v[1] is not None:
                 g["int"].append(
@@ -526,10 +816,13 @@ class Diagram:
                 (e,) = key
                 p = P(e)
                 c = (p[0] + 0.25, p[1])
-                g["loop"].append((c, 0.25))
-                g["labels"].append((members[0][0], (c[0] + 0.42, c[1])))
+                g["loop"].append((c, 0.25, "solid"))
+                label(members[0][0], (c[0] + 0.42, c[1]))
                 g["arrows"].append(((c[0], c[1] + 0.25), (-1.0, 0.0)))
-                extent += [(c[0] + 0.55, c[1] + 0.3), (c[0], c[1] - 0.3)]
+                extent += [
+                    (c[0] + (0.55 if self.labels else 0.3), c[1] + 0.3),
+                    (c[0], c[1] - 0.3),
+                ]
             elif len(members) == 1:
                 x_, kind, a, b = members[0]
                 pa, pb = P(a), P(b)
@@ -541,8 +834,7 @@ class Diagram:
                 c1 = (mid[0] + 0.2 * nrm[0], mid[1] + 0.2 * nrm[1])
                 c2 = (mid[0] - 0.2 * nrm[0], mid[1] - 0.2 * nrm[1])
                 lab = c1 if _dist(c1, (cx, cy)) >= _dist(c2, (cx, cy)) else c2
-                g["labels"].append((x_, lab))
-                extent.append(lab)
+                label(x_, lab)
             else:  # two lines between the same ends: bubble
                 p1, p2 = sorted(P(e) for e in key)
                 dc = _unit(p1, p2)
@@ -555,31 +847,33 @@ class Diagram:
                     )  # peak 0.4: clear of the next row
                     mid = ((pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2)
                     g["bubble"].append(
-                        (pa, (mid[0] + bulge * nrm[0], mid[1] + bulge * nrm[1]), pb)
+                        (
+                            pa,
+                            (mid[0] + bulge * nrm[0], mid[1] + bulge * nrm[1]),
+                            pb,
+                            "solid",
+                        )
                     )
                     top = (mid[0] + 0.5 * bulge * nrm[0], mid[1] + 0.5 * bulge * nrm[1])
                     g["arrows"].append((top, d))
                     sgn = 1 if bulge > 0 else -1
                     lab = (top[0] + 0.2 * sgn * nrm[0], top[1] + 0.2 * sgn * nrm[1])
-                    g["labels"].append((x_, lab))
-                    extent.append(lab)
+                    label(x_, lab)
         (a, pi), (po, b) = self._legs(x)
         g["straight"] += [(a, pi), (po, b)]
         g["arrows"] += [
             (((a[0] + pi[0]) / 2, (a[1] + pi[1]) / 2), (0.0, 1.0)),
             (((po[0] + b[0]) / 2, (po[1] + b[1]) / 2), (0.0, 1.0)),
         ]
-        g["labels"] += [
-            (self.vin[0], (a[0] - 0.2, a[1] + 0.35)),
-            (self.vout[0], (b[0] - 0.2, b[1] - 0.35)),
-        ]
-        extent += [a, b, (a[0] - 0.2, a[1]), (b[0] - 0.2, b[1])]
+        extent += [a, b]
+        label(self.vin[0], (a[0] - 0.2, a[1] + 0.35), (a[0] - 0.2, a[1]))
+        label(self.vout[0], (b[0] - 0.2, b[1] - 0.35), (b[0] - 0.2, b[1]))
         R = lambda p: (p[1], -p[0])  # rotate: time -> x (left to right), row 0 -> top
         g["int"] = [(R(a), R(b), st) for a, b, st in g["int"]]
         g["marker"] = [(R(p), st) for p, st in g["marker"]]
         g["straight"] = [(R(a), R(b)) for a, b in g["straight"]]
-        g["bubble"] = [(R(a), R(c), R(b)) for a, c, b in g["bubble"]]
-        g["loop"] = [(R(c), r) for c, r in g["loop"]]
+        g["bubble"] = [(R(a), R(c), R(b), st) for a, c, b, st in g["bubble"]]
+        g["loop"] = [(R(c), r, st) for c, r, st in g["loop"]]
         g["arrows"] = [(R(p), R(d)) for p, d in g["arrows"]]
         g["labels"] = [(l, R(p)) for l, p in g["labels"]]
         extent = [R(p) for p in extent]
@@ -592,238 +886,6 @@ class Diagram:
             max(ys) + self.pad,
         ]
         return g
-
-    def size(self, scale=40.0):
-        x0, y0, x1, y1 = self._geometry()["bbox"]
-        return (x1 - x0) * scale, (y1 - y0) * scale
-
-    # ------------------------------------------------------------------------------------------
-    # SVG
-    # ------------------------------------------------------------------------------------------
-    def svg_body(self, scale=40.0, ox=0.0, oy=0.0):
-        g = self._geometry()
-        x0, y0, x1, y1 = g["bbox"]
-        T = lambda p: (
-            ox + (p[0] - x0) * scale,
-            oy + (y1 - p[1]) * scale,
-        )  # y up -> svg y down
-        line = (
-            lambda a, b, extra="": '<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="black" stroke-width="1.2"%s/>'
-            % (T(a) + T(b) + (extra,))
-        )
-        el = []
-        for a, b, style in g["int"]:
-            if style == "wavy":
-                el.append(
-                    '<polyline fill="none" stroke="black" stroke-width="1.2" points="%s"/>'
-                    % " ".join("%.1f,%.1f" % T(p) for p in _wave(a, b))
-                )
-            elif style == "double":
-                for sgn in (1, -1):
-                    el.append(line(*_offset(a, b, 0.045 * sgn)))
-            else:
-                el.append(
-                    line(
-                        a,
-                        b,
-                        {
-                            "dashed": ' stroke-dasharray="6,4"',
-                            "dotted": ' stroke-dasharray="1.5,3.5" stroke-linecap="round"',
-                        }.get(style, ""),
-                    )
-                )
-        for p, style in g["marker"]:
-            px, py = T(p)
-            r = 0.11 * scale
-            if style == "dot":
-                el.append(
-                    '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="black"/>'
-                    % (px, py, 0.7 * r)
-                )
-            elif style == "circle":
-                el.append(
-                    '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="white" stroke="black" stroke-width="1.2"/>'
-                    % (px, py, r)
-                )
-            elif style == "square":
-                el.append(
-                    '<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="white" stroke="black" stroke-width="1.2"/>'
-                    % (px - r, py - r, 2 * r, 2 * r)
-                )
-            else:
-                el.append(
-                    '<path d="M%.1f,%.1f L%.1f,%.1f M%.1f,%.1f L%.1f,%.1f" stroke="black" stroke-width="1.4"/>'
-                    % (px - r, py - r, px + r, py + r, px - r, py + r, px + r, py - r)
-                )
-        for a, b in g["straight"]:
-            el.append(line(a, b))
-        for a, c, b in g["bubble"]:
-            el.append(
-                '<path d="M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f" fill="none" stroke="black" stroke-width="1.2"/>'
-                % (T(a) + T(c) + T(b))
-            )
-        for c, r in g["loop"]:
-            el.append(
-                '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="black" stroke-width="1.2"/>'
-                % (T(c) + (r * scale,))
-            )
-        for p, d in g["arrows"]:
-            el.append(
-                '<polygon fill="black" points="%s"/>'
-                % " ".join("%.1f,%.1f" % T(q) for q in _arrowhead(p, d))
-            )
-        for lab, p in g["labels"]:
-            el.append(
-                '<text x="%.1f" y="%.1f" font-family="serif" font-style="italic" font-size="%.0f" '
-                'text-anchor="middle" dominant-baseline="middle">%s</text>'
-                % (T(p) + (0.4 * scale, lab))
-            )
-        return "\n".join(el)
-
-    def svg(self, scale=40.0):
-        W, H = self.size(scale)
-        return _svg_wrap(self.svg_body(scale), W, H)
-
-    def _repr_svg_(self):
-        return self.svg()
-
-    # ------------------------------------------------------------------------------------------
-    # PDF (written directly; vector graphics, Times-Italic labels)
-    # ------------------------------------------------------------------------------------------
-    def pdf_body(self, scale=40.0, ox=0.0, oy=0.0):
-        g = self._geometry()
-        x0, y0, x1, y1 = g["bbox"]
-        T = lambda p: (ox + (p[0] - x0) * scale, oy + (p[1] - y0) * scale)
-        f = lambda p: "%.2f %.2f" % T(p)
-        el = ["1.2 w 0 J 0 j"]
-        for a, b, style in g["int"]:
-            if style == "wavy":
-                pts = _wave(a, b)
-                el.append(
-                    "%s m %s S" % (f(pts[0]), " ".join(f(p) + " l" for p in pts[1:]))
-                )
-            elif style == "double":
-                for sgn in (1, -1):
-                    a2, b2 = _offset(a, b, 0.045 * sgn)
-                    el.append("%s m %s l S" % (f(a2), f(b2)))
-            else:
-                dash = {"dashed": "[6 4] 0 d", "dotted": "[0.1 3.5] 0 d 1 J"}.get(style)
-                el.append(
-                    ("%s %s m %s l S [] 0 d 0 J" % (dash, f(a), f(b)))
-                    if dash
-                    else "%s m %s l S" % (f(a), f(b))
-                )
-        for p, style in g["marker"]:
-            px, py = T(p)
-            r = 0.11 * scale
-            if style == "dot":
-                el.append(_pdf_circle(px, py, 0.7 * r) + " f")
-            elif style == "circle":
-                el.append(_pdf_circle(px, py, r) + " S")
-            elif style == "square":
-                el.append("%.2f %.2f %.2f %.2f re S" % (px - r, py - r, 2 * r, 2 * r))
-            else:
-                el.append(
-                    "1.4 w %.2f %.2f m %.2f %.2f l %.2f %.2f m %.2f %.2f l S 1.2 w"
-                    % (px - r, py - r, px + r, py + r, px - r, py + r, px + r, py - r)
-                )
-        for a, b in g["straight"]:
-            el.append("%s m %s l S" % (f(a), f(b)))
-        for a, c, b in g["bubble"]:  # quadratic -> cubic Bezier
-            c1 = (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1]))
-            c2 = (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1]))
-            el.append("%s m %s %s %s c S" % (f(a), f(c1), f(c2), f(b)))
-        for c, r in g["loop"]:
-            el.append(_pdf_circle(*T(c), r * scale) + " S")
-        for p, d in g["arrows"]:
-            q = [T(v) for v in _arrowhead(p, d)]
-            el.append("%.2f %.2f m %.2f %.2f l %.2f %.2f l f" % (q[0] + q[1] + q[2]))
-        fs = 0.4 * scale
-        for lab, p in g["labels"]:
-            px, py = T(p)
-            el.append(
-                "BT /F1 %.1f Tf %.2f %.2f Td (%s) Tj ET"
-                % (fs, px - 0.25 * fs, py - 0.2 * fs, lab)
-            )
-        return "\n".join(el)
-
-    def pdf(self, scale=40.0):
-        W, H = self.size(scale)
-        return _pdf_wrap(self.pdf_body(scale), W, H)
-
-    # ------------------------------------------------------------------------------------------
-    # TikZ (coordinates in diagram units, 1 unit = `unit` cm; the same geometry as the SVG and PDF)
-    # ------------------------------------------------------------------------------------------
-    def tikz_body(self, unit=1.0):
-        """TikZ drawing commands (no tikzpicture environment); wavy lines use the snake decoration of
-        \\usetikzlibrary{decorations.pathmorphing}"""
-        g = self._geometry()
-        C = lambda p: "(%s,%s)" % (_num(p[0]), _num(p[1]))
-        el = []
-        for a, b, style in g["int"]:
-            opt = {
-                "wavy": "decorate,decoration={snake,amplitude=%smm,segment length=%smm}"
-                % (_num(0.7 * unit), _num(2.5 * unit)),
-                "dashed": "dashed",
-                "dotted": "dotted",
-                "double": "double,double distance=%spt" % _num(1.8 * unit),
-            }.get(style, "")
-            el.append("\\draw%s %s -- %s;" % ("[%s]" % opt if opt else "", C(a), C(b)))
-        for p, style in g["marker"]:
-            r = 0.11
-            if style == "dot":
-                el.append("\\fill %s circle (%s);" % (C(p), _num(0.7 * r)))
-            elif style == "circle":
-                el.append("\\draw[fill=white] %s circle (%s);" % (C(p), _num(r)))
-            elif style == "square":
-                el.append(
-                    "\\draw[fill=white] %s rectangle %s;"
-                    % (C((p[0] - r, p[1] - r)), C((p[0] + r, p[1] + r)))
-                )
-            else:
-                el.append(
-                    "\\draw[line width=%spt] %s -- %s %s -- %s;"
-                    % (
-                        _num(unit),
-                        C((p[0] - r, p[1] - r)),
-                        C((p[0] + r, p[1] + r)),
-                        C((p[0] - r, p[1] + r)),
-                        C((p[0] + r, p[1] - r)),
-                    )
-                )
-        for a, b in g["straight"]:
-            el.append("\\draw %s -- %s;" % (C(a), C(b)))
-        for a, c, b in g["bubble"]:  # quadratic -> cubic Bezier
-            c1 = (a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1]))
-            c2 = (b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1]))
-            el.append(
-                "\\draw %s .. controls %s and %s .. %s;" % (C(a), C(c1), C(c2), C(b))
-            )
-        for c, r in g["loop"]:
-            el.append("\\draw %s circle (%s);" % (C(c), _num(r)))
-        for p, d in g["arrows"]:
-            el.append(
-                "\\fill %s -- %s -- %s -- cycle;"
-                % tuple(C(q) for q in _arrowhead(p, d))
-            )
-        for lab, p in g["labels"]:
-            el.append("\\node at %s {$%s$};" % (C(p), lab))
-        return "\n".join(el)
-
-    def tikz(self, unit=1.0, standalone=False):
-        """the picture as TikZ source: a tikzpicture to \\input (1 diagram unit = `unit` cm), or with
-        standalone=True a complete document.  Needs \\usetikzlibrary{decorations.pathmorphing}.
-        """
-        body = "%% %s\n%s\n%s\n\\end{tikzpicture}" % (
-            self._term_str(),
-            _tikz_begin(unit),
-            self.tikz_body(unit),
-        )
-        return _tikz_standalone(body) if standalone else body
-
-    def save(self, path, scale=40.0, unit=1.0):
-        """write .svg, .pdf, .tikz (tikzpicture, to \\input) or .tex (standalone TikZ document)"""
-        return _save(self, path, scale, unit)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -921,7 +983,8 @@ class Equation(str):
 
 
 def diagram(term, **kw):
-    """the diagram of one term (string or list of integrals); keywords: styles, pad, omega, core/exc/val, types"""
+    """the diagram of one term (string or list of integrals); keywords: styles, pad, omega, labels,
+    core/exc/val, types"""
     if isinstance(term, Diagram):
         return term
     return Diagram(term, **kw).layout()
@@ -1092,6 +1155,72 @@ def _arrowhead(p, d, length=0.16, width=0.08):
         (base[0] + width * n[0], base[1] + width * n[1]),
         (base[0] - width * n[0], base[1] - width * n[1]),
     ]
+
+
+_SVG_DASH = {
+    "dashed": ' stroke-dasharray="6,4"',
+    "dotted": ' stroke-dasharray="1.5,3.5" stroke-linecap="round"',
+}
+_PDF_DASH = {"dashed": "[6 4] 0 d", "dotted": "[0.1 3.5] 0 d 1 J"}
+
+
+def _tikz_opt(style, unit):
+    """the TikZ options of a line style: '[...]' or ''"""
+    opt = {
+        "wavy": "decorate,decoration={snake,amplitude=%smm,segment length=%smm}"
+        % (_num(0.7 * unit), _num(2.5 * unit)),
+        "dashed": "dashed",
+        "dotted": "dotted",
+        "double": "double,double distance=%spt" % _num(1.8 * unit),
+    }.get(style, "")
+    return "[%s]" % opt if opt else ""
+
+
+def _bezier(a, c, b, npts=120):
+    """points and unit tangents along the quadratic Bezier curve a -> b with control point c"""
+    pts, tans = [], []
+    for i in range(npts + 1):
+        t = i / npts
+        u = 1 - t
+        pts.append(
+            (
+                u * u * a[0] + 2 * u * t * c[0] + t * t * b[0],
+                u * u * a[1] + 2 * u * t * c[1] + t * t * b[1],
+            )
+        )
+        dx, dy = 2 * u * (c[0] - a[0]) + 2 * t * (b[0] - c[0]), 2 * u * (
+            c[1] - a[1]
+        ) + 2 * t * (b[1] - c[1])
+        L = math.hypot(dx, dy)
+        tans.append((dx / L, dy / L) if L > 0 else (1.0, 0.0))
+    return pts, tans
+
+
+def _circle(c, r, npts=120):
+    """points and unit tangents around the circle of radius r about c (counter-clockwise from the bottom)"""
+    pts, tans = [], []
+    for i in range(npts + 1):
+        th = 2 * math.pi * i / npts - math.pi / 2
+        pts.append((c[0] + r * math.cos(th), c[1] + r * math.sin(th)))
+        tans.append((-math.sin(th), math.cos(th)))
+    return pts, tans
+
+
+def _wavy(pts, tans, amp=0.07, wavelength=0.25):
+    """a wavy line along a curve: sinusoid in the arc length, displaced along the normal"""
+    k = 2 * math.pi / wavelength
+    out, s = [], 0.0
+    for i, (p, d) in enumerate(zip(pts, tans)):
+        if i:
+            s += _dist(pts[i - 1], p)
+        h = amp * math.sin(k * s)
+        out.append((p[0] - d[1] * h, p[1] + d[0] * h))
+    return out
+
+
+def _offset_pts(pts, tans, h):
+    """the curve displaced by h along its normal"""
+    return [(p[0] - d[1] * h, p[1] + d[0] * h) for p, d in zip(pts, tans)]
 
 
 def _wave(a, b, amp=0.07, wavelength=0.25, npts=120):

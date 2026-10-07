@@ -4,6 +4,7 @@
 * Uses Goldstone rules to also construct pertrubation term, including sign and energy denominators
 * Can export diagrams as images, or as tikz source code
 * Can also parse the pertrubation term into LaTeX 
+* `feynmanator.py` draws Feynman diagrams (Green's function, Coulomb and polarisation lines) from a product of propagators, with the same exports: see the [last section](#feynman-diagrams-feynmanatorpy)
 
 
 ## Setup
@@ -99,4 +100,33 @@ gd.grid(["t_na g_wavn", "g_wnva t_an"]).equation()
 `styles={'S': 'dotted', 't': 'cross'}` on `diagram` or `grid`, or `gd.STYLES['t'] = 'cross'` for the whole session.
 Two-body lines: `wavy` (default for `g`), `dashed` (default for other names), `dotted`, `double`, `solid`.
 One-body markers: `x` or `cross` (default), `dot`, `circle`, `square`.
-`pad=` adds margin around the picture; the energy symbols are `gd.EPS` and `gd.OMEGA`.
+`pad=` adds margin around the picture, `labels=False` leaves the orbital labels off it; the energy symbols are `gd.EPS` and `gd.OMEGA`.
+
+## Feynman diagrams (`feynmanator.py`)
+
+The same pictures and files for Feynman diagrams, from a product of propagators. There are no rules to derive, only the drawing (`feynman_draw.ipynb` shows the examples below and more):
+
+```python
+import feynmanator as fd
+
+d = fd.diagram("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)")   # second-order direct self-energy
+d                                                          # the picture, inline
+print(d.tikz()); d.save("fig.pdf")                         # .svg, .pdf, .tikz, .tex as above
+fd.grid(["v(1) G(1,2) w(2) Q(1,2)", "v(1) w(1) Q(1,2) G(2,2)"], ncols=2)
+```
+
+![feynman](img/feynman.svg)
+
+A factor is `name(label)` or `name(label,label)`; the labels name the vertices, and any letters or digits will do.
+
+* `G(1,2)`: internal line (Green's function), solid, no arrow. `G(1,1)` is a closed loop (tadpole).
+* `Q(1,2)`: Coulomb line, wavy. Its ends need not touch anything else: `Q(1,2) T(2)` is a line to an external potential.
+* `PI(1,2)` (also `Pi`, `\Pi`): polarisation loop, `G(1,2) G(2,1)`, drawn as two arcs that never overlap.
+* `v(1)`, `w(2)` (names `v w x y`): external lines, with arrows. The first one written enters at the top left, the second leaves at the right; at most one of each.
+* Any other name with one label, `T(1)`, is a marker at that vertex (a cross by default); with two labels, `S(1,2)`, a dashed line. `styles={'T': 'dot', 'S': 'dotted', 'G': 'double'}` changes them, as for Goldstone diagrams.
+
+Nothing is drawn at a plain vertex, and there are no labels.
+The vertices are placed on a small grid, the incoming vertex at the top left, the outgoing one at the right and the fermion line between them straight (`straight=False` frees it); every placement is scored (lines through a vertex, overlapping and crossing lines, length, size, bends, tilted bubbles) and the best one is drawn.
+Lines between the same two vertices are bent into arcs on alternate sides.
+A closed loop of `G` lines is drawn counterclockwise in the direction of propagation (`G(a,b)` runs from b to a), so writing the loop the other way round mirrors it: `G(3,i) t(i) G(i,6) G(6,3)` puts the insertion `i` on the upper line of the loop, `G(3,6) G(6,i) t(i) G(i,3)` on the lower one.
+`fd.diagram(term).layout(cols=, rows=)` sets the grid when the automatic one is not what you want.
