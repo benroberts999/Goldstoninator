@@ -16,9 +16,12 @@ follows from the numerator alone:
   * a particle is created (out slot) before it is annihilated (in slot); a hole is created when the
     electron leaves the core state (in slot) and filled later (out slot): these inequalities order
     the vertices in time;
-  * the valence letters give the external legs: in slot = incoming, out slot = outgoing.
+  * the valence letters give the external legs: in slot = incoming, out slot = outgoing; one or two
+    valence lines (two incoming and two outgoing letters: an effective two-body interaction).
 
-Time runs left to right, the incoming valence line enters at the top left.  If some integrals are
+Time runs left to right, the incoming valence line enters at the top left; along the valence line
+particle lines are horizontal and hole lines slope down to the left (closed loops are placed freely,
+a bubble is a lens).  If some integrals are
 written in the opposite convention (g_{rspq}) this is detected: the reading in which the fewest
 integrals are flipped is used (flipping all of them is the time-reversed diagram).
 
@@ -147,6 +150,7 @@ class Picture:
         int      [(a, b, style)]     straight line a -- b; style wavy, dashed, dotted, double or solid
         bubble   [(a, c, b, style)]  quadratic Bezier arc a -- b with control point c
         loop     [(c, r, style)]     circle of radius r about c
+        arc      [(c, r, t0, t1, style)]  circular arc about c, counterclockwise from angle t0 to t1
         straight [(a, b)]            plain solid line (the external legs)
         marker   [(p, style)]        x (cross), dot, circle or square at p
         arrows   [(p, d)]            arrowhead at p pointing along the unit vector d
@@ -244,6 +248,21 @@ class Picture:
                     '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="black" stroke-width="1.2"%s/>'
                     % (T(c) + (r * scale, _SVG_DASH.get(style, "")))
                 )
+        for c, r, t0, t1, style in g.get("arc", []):
+            pts, tans = _carc(c, r, t0, t1)
+            if style == "wavy":
+                el.append(poly(_wavy(pts, tans)))
+            elif style == "double":
+                for sgn in (1, -1):
+                    el.append(poly(_offset_pts(pts, tans, 0.045 * sgn)))
+            else:
+                el.append(
+                    '<polyline fill="none" stroke="black" stroke-width="1.2"%s points="%s"/>'
+                    % (
+                        _SVG_DASH.get(style, ""),
+                        " ".join("%.1f,%.1f" % T(p) for p in pts),
+                    )
+                )
         for p, d in g["arrows"]:
             el.append(
                 '<polygon fill="black" points="%s"/>'
@@ -328,6 +347,15 @@ class Picture:
                     el.append(_pdf_circle(*T(c), (r + 0.045 * sgn) * scale) + " S")
             else:
                 el.append(dashed(_pdf_circle(*T(c), r * scale) + " S", style))
+        for c, r, t0, t1, style in g.get("arc", []):
+            pts, tans = _carc(c, r, t0, t1)
+            if style == "wavy":
+                el.append(poly(_wavy(pts, tans)))
+            elif style == "double":
+                for sgn in (1, -1):
+                    el.append(poly(_offset_pts(pts, tans, 0.045 * sgn)))
+            else:
+                el.append(dashed(poly(pts), style))
         for p, d in g["arrows"]:
             q = [T(v) for v in _arrowhead(p, d)]
             el.append("%.2f %.2f m %.2f %.2f l %.2f %.2f l f" % (q[0] + q[1] + q[2]))
@@ -390,6 +418,17 @@ class Picture:
             el.append(
                 "\\draw%s %s circle (%s);" % (_tikz_opt(style, unit), C(c), _num(r))
             )
+        for c, r, t0, t1, style in g.get("arc", []):
+            el.append(
+                "\\draw%s %s arc[start angle=%s, end angle=%s, radius=%s];"
+                % (
+                    _tikz_opt(style, unit),
+                    C((c[0] + r * math.cos(t0), c[1] + r * math.sin(t0))),
+                    _num(math.degrees(t0)),
+                    _num(math.degrees(t1)),
+                    _num(r),
+                )
+            )
         for p, d in g["arrows"]:
             el.append(
                 "\\fill %s -- %s -- %s -- cycle;"
@@ -421,7 +460,8 @@ class Picture:
 class Diagram(Picture):
     """Attributes: verts (out1, out2, in1, in2) with out2 = in2 = None for a one-body vertex; vertex k
     has ends (k,0) and, for two-body, (k,1); names; flips; order (earliest first); level[k];
-    lines [(label, 'exc'|'core', src_end, dst_end)]; vin, vout (label, end); x[end] = row after layout;
+    lines [(label, 'exc'|'core', src_end, dst_end)]; vins, vouts [(label, end)], one or two each in the
+    order of the valence letters (vin, vout: the first); x[end] = row after layout;
     sign after denominators()/tex().
 
     omega: which vertices absorb an energy (entering the denominators after them) and its tex symbol.
@@ -449,12 +489,16 @@ class Diagram(Picture):
         self.pad = pad
         self.omega = omega
         self.labels = labels
+        self.valorder = val
         self.types = _types(types, core, exc, val)
         for x in {x for g in self.gs for x in g}:
             self.types.setdefault(x, "exc")  # any other letter is excited
         self._orient()
         self._lines()
         self._order()
+        self.open = {
+            x for path in self._paths() for x in path
+        }  # on a valence line: drawing rule
         self.x = {}  # row of every vertex end, set by layout()
 
     def _term_str(self):
@@ -483,7 +527,7 @@ class Diagram(Picture):
                     return False
                 else:
                     outs[o] = k
-        return vin == 1 and vout == 1 and set(ins) == set(outs)
+        return vin == vout and vin in (1, 2) and set(ins) == set(outs)
 
     def _orient(self):
         as_vert = lambda g, f: (
@@ -499,7 +543,7 @@ class Diagram(Picture):
         if not sols:
             raise ValueError(
                 "not a valid Goldstone numerator: %s (each non-valence letter must appear once as "
-                "an out index and once as an in index, valence once in and once out)"
+                "an out index and once as an in index, one or two valence letters in and as many out)"
                 % self._term_str()
             )
         sols.sort(key=lambda s: s[0])
@@ -518,8 +562,21 @@ class Diagram(Picture):
                     vout.append((o, (k, side)))
                 else:
                     out_end[o] = (k, side)
-        (self.vin,) = vin  # exactly one in and one out valence leg (see _valid)
-        (self.vout,) = vout
+        order = lambda le: (
+            (
+                self.valorder.index(le[0])
+                if le[0] in self.valorder
+                else len(self.valorder)
+            ),
+            le[0],
+        )
+        self.vins = sorted(
+            vin, key=order
+        )  # one or two incoming and as many outgoing valence
+        self.vouts = sorted(
+            vout, key=order
+        )  # legs (see _valid), in the order of the valence letters
+        self.vin, self.vout = self.vins[0], self.vouts[0]  # the first of each
         self.lines = [(x, self.types[x], out_end[x], in_end[x]) for x in out_end]
 
     def _order(self):
@@ -541,17 +598,45 @@ class Diagram(Picture):
         self.level = {k: i for i, k in enumerate(self.order)}
 
     # ------------------------------------------------------------------------------------------
-    def _loops(self):
-        """number of closed fermion loops"""
+    def _nxt(self):
+        """letter -> the letter emitted at the end where it is absorbed (along the fermion lines)"""
         nxt = {}
         for v in self.verts:
             for _, o, i in self._ends(v):
                 nxt[i] = o
-        seen = {self.vin[0]}
-        x = self.vin[0]
-        while self.types[nxt[x]] != "val":  # follow the open (valence) line
-            x = nxt[x]
-            seen.add(x)
+        return nxt
+
+    def _paths(self):
+        """the letters of the open (valence) fermion lines, one list per incoming letter, from it to
+        the outgoing letter"""
+        nxt = self._nxt()
+        paths = []
+        for v, _ in self.vins:
+            path = [v]
+            while self.types[nxt[path[-1]]] != "val":
+                path.append(nxt[path[-1]])
+            paths.append(path + [nxt[path[-1]]])
+        return paths
+
+    def _crossed(self):
+        """1 if the open lines pair the outgoing valence letters with the incoming ones the other way
+        round than the order of the valence letters (the exchange diagram), else 0"""
+        want = [w for w, _ in self.vouts]
+        perm = [want.index(path[-1]) for path in self._paths()]
+        return (
+            sum(
+                1
+                for i in range(len(perm))
+                for j in range(i + 1, len(perm))
+                if perm[i] > perm[j]
+            )
+            % 2
+        )
+
+    def _loops(self):
+        """number of closed fermion loops"""
+        nxt = self._nxt()
+        seen = {x for path in self._paths() for x in path}
         loops = 0
         for x in nxt:
             if x in seen or self.types[x] == "val":
@@ -577,12 +662,14 @@ class Diagram(Picture):
     def denominators(self):
         """[(plus, minus, omega), ...] per gap between successive vertices: the labels whose orbital
         energies enter with + and - sign (valence energy first and positive) and {symbol: coefficient}
-        of the energies absorbed at the vertices.  The final valence energy is removed with
-        eps_final = eps_initial + sum(omega) whenever some vertex absorbs an energy.  Sets self.sign.
+        of the energies absorbed at the vertices.  The initial energy is that of the incoming valence
+        letter(s); the final valence energy is removed with eps_final = eps_initial + sum(omega)
+        whenever some vertex absorbs an energy (with two valence lines, once both outgoing legs
+        exist).  Sets self.sign.
         """
         lv = self.level
-        v, kv = self.vin[0], self.vin[1][0]
-        w, kw = self.vout[0], self.vout[1][0]
+        ins = [(v, lv[k]) for v, (k, _) in self.vins]
+        outs = [(w, lv[k]) for w, (k, _) in self.vouts]
         absorbed = sorted(
             ((k, s) for k, s in enumerate(self.omegas()) if s), key=lambda ks: lv[ks[0]]
         )
@@ -594,17 +681,26 @@ class Diagram(Picture):
                     minus.append(x)
                 if kind == "core" and lv[ki] <= i < lv[ko]:
                     plus.append(x)
-            val = {v: 1}  # initial energy eps_v ...
-            if lv[kv] > i:  # ... minus the incoming leg while it still travels
-                val[v] -= 1
-            created = lv[kw] <= i  # ... minus the outgoing leg once created, with
-            if created and absorbed:  #     eps_final = eps_v + sum(omega) ...
-                val[v] -= 1
-            elif created:  #     ... or as eps_w when nothing is absorbed
-                val[w] = val.get(w, 0) - 1
+            val = {}  # the initial energy: the incoming valence letters ...
+            for v, kv in ins:
+                val[v] = val.get(v, 0) + 1
+                if kv > i:  # ... minus an incoming leg while it still travels
+                    val[v] -= 1
+            created = [
+                w for w, kw in outs if kw <= i
+            ]  # ... minus the outgoing legs once created:
+            done = len(created) == len(outs)
+            if (
+                done and absorbed
+            ):  #     all of them, as eps_final = eps_initial + sum(omega) ...
+                for v, _ in ins:
+                    val[v] -= 1
+            else:  #     ... or each by its own energy when nothing is absorbed (or some are missing)
+                for w in created:
+                    val[w] = val.get(w, 0) - 1
             om = {}
             for k, s in absorbed:  # + omega once absorbed, - omega inside eps_final
-                c = (1 if lv[k] <= i else 0) - (1 if created else 0)
+                c = (1 if lv[k] <= i else 0) - (1 if done else 0)
                 om[s] = om.get(s, 0) + c
             om = {s: c for s, c in om.items() if c}
             vplus = [x for x, c in val.items() if c > 0]
@@ -620,7 +716,7 @@ class Diagram(Picture):
                 )
             out.append((vplus + sorted(plus), vminus + sorted(minus), om))
         nh = sum(1 for _, kind, _, _ in self.lines if kind == "core")
-        self.sign = (-1) ** (nh + self._loops() + flips)
+        self.sign = (-1) ** (nh + self._loops() + flips + self._crossed())
         return out
 
     @staticmethod
@@ -668,10 +764,16 @@ class Diagram(Picture):
     # layout: a row for every vertex end, minimising crossings (x = row, y = time; rotated when drawn)
     # ------------------------------------------------------------------------------------------
     def _legs(self, x):
+        """[(a, b, letter, incoming)] of the external legs, incoming ones first"""
         ymin, ymax = 0.0, float(len(self.verts) - 1)
-        pi = (float(x[self.vin[1]]), float(self.level[self.vin[1][0]]))
-        po = (float(x[self.vout[1]]), float(self.level[self.vout[1][0]]))
-        return ((pi[0], ymin - self.LEG), pi), (po, (po[0], ymax + self.LEG))
+        legs = []
+        for letter, e in self.vins:
+            p = (float(x[e]), float(self.level[e[0]]))
+            legs.append(((p[0], ymin - self.LEG), p, letter, True))
+        for letter, e in self.vouts:
+            p = (float(x[e]), float(self.level[e[0]]))
+            legs.append((p, (p[0], ymax + self.LEG), letter, False))
+        return legs
 
     def _segments(self, x):
         P = lambda e: (float(x[e]), float(self.level[e[0]]))
@@ -684,7 +786,7 @@ class Diagram(Picture):
             if a != b and key not in seen:
                 seen.add(key)
                 segs.append((P(a), P(b)))
-        segs += list(self._legs(x))
+        segs += [(a, b) for a, b, _, _ in self._legs(x)]
         return segs
 
     def _score(self, x):
@@ -700,7 +802,7 @@ class Diagram(Picture):
                     cross += 1
                 elif _collinear_overlap(a, b, c, d):
                     bad += 1
-        val_x = x[self.vin[1]] + x[self.vout[1]]
+        val_x = sum(x[e] for _, e in self.vins + self.vouts)
         travel = sum(abs(x[a] - x[b]) for _, _, a, b in self.lines)
         wavy = sum(
             abs(x[(k, 0)] - x[(k, 1)]) - 1
@@ -708,9 +810,22 @@ class Diagram(Picture):
             if v[1] is not None
         )
         width = max(x.values()) - min(x.values())
+        rule = 0  # valence line: particles level, holes down to the left (closed loops are free)
+        for (
+            letter,
+            kind,
+            a,
+            b,
+        ) in self.lines:  # a: emitted (out slot), b: absorbed (in slot)
+            if letter in self.open:
+                if kind == "exc":
+                    rule += abs(x[a] - x[b])
+                else:  # hole: created at b (earlier), filled at a (later): b at least a row lower
+                    rule += max(0, x[a] + 1 - x[b])
         return (
             100 * bad
             + 10 * cross
+            + 8 * rule
             + 1.0 * val_x
             + 0.3 * travel
             + 0.3 * wavy
@@ -718,8 +833,22 @@ class Diagram(Picture):
         )
 
     def layout(self, nrows=None, max_eval=40000, seed=0):
+        """choose the row of every vertex end, minimising _score().  Without nrows, one row more than
+        there are vertices is tried first, and more rows whenever the best arrangement still has a
+        line through a vertex or on top of another line (each such fault costs 100)"""
         n = len(self.verts)
-        nrows = nrows or n + 1
+        rows = [nrows] if nrows else list(range(n + 1, n + 5))
+        best = self._layout(rows[0], max_eval, seed)
+        for r in rows[1:]:
+            if best[0] < 100:
+                break
+            best = self._layout(r, max_eval, seed)
+        self.score, self.x = best
+        return self
+
+    def _layout(self, nrows, max_eval, seed):
+        """(score, x) of the best arrangement on nrows rows"""
+        n = len(self.verts)
         two = [(a, b) for a in range(nrows) for b in range(nrows) if a != b]
         one = [(a, None) for a in range(nrows)]
         k0, side = self.vin[1]  # incoming valence line in row 0 (top)
@@ -762,8 +891,7 @@ class Diagram(Picture):
                         if sy < s:
                             s, x, improved = sy, y, True
             best = (s, x)
-        self.score, self.x = best
-        return self
+        return best
 
     # ------------------------------------------------------------------------------------------
     # geometry (time -> x, row 0 -> top), shared by the SVG and PDF output
@@ -859,15 +987,14 @@ class Diagram(Picture):
                     sgn = 1 if bulge > 0 else -1
                     lab = (top[0] + 0.2 * sgn * nrm[0], top[1] + 0.2 * sgn * nrm[1])
                     label(x_, lab)
-        (a, pi), (po, b) = self._legs(x)
-        g["straight"] += [(a, pi), (po, b)]
-        g["arrows"] += [
-            (((a[0] + pi[0]) / 2, (a[1] + pi[1]) / 2), (0.0, 1.0)),
-            (((po[0] + b[0]) / 2, (po[1] + b[1]) / 2), (0.0, 1.0)),
-        ]
-        extent += [a, b]
-        label(self.vin[0], (a[0] - 0.2, a[1] + 0.35), (a[0] - 0.2, a[1]))
-        label(self.vout[0], (b[0] - 0.2, b[1] - 0.35), (b[0] - 0.2, b[1]))
+        for a, b, letter, incoming in self._legs(x):
+            g["straight"].append((a, b))
+            g["arrows"].append((((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), (0.0, 1.0)))
+            extent += [a, b]
+            if incoming:
+                label(letter, (a[0] - 0.2, a[1] + 0.35), (a[0] - 0.2, a[1]))
+            else:
+                label(letter, (b[0] - 0.2, b[1] - 0.35), (b[0] - 0.2, b[1]))
         R = lambda p: (p[1], -p[0])  # rotate: time -> x (left to right), row 0 -> top
         g["int"] = [(R(a), R(b), st) for a, b, st in g["int"]]
         g["marker"] = [(R(p), st) for p, st in g["marker"]]
@@ -1201,6 +1328,17 @@ def _circle(c, r, npts=120):
     pts, tans = [], []
     for i in range(npts + 1):
         th = 2 * math.pi * i / npts - math.pi / 2
+        pts.append((c[0] + r * math.cos(th), c[1] + r * math.sin(th)))
+        tans.append((-math.sin(th), math.cos(th)))
+    return pts, tans
+
+
+def _carc(c, r, t0, t1, npts=None):
+    """points and unit tangents along the circular arc about c from angle t0 to t1 (counterclockwise)"""
+    npts = npts or max(12, int(24 * r * abs(t1 - t0)) + 1)
+    pts, tans = [], []
+    for i in range(npts + 1):
+        th = t0 + (t1 - t0) * i / npts
         pts.append((c[0] + r * math.cos(th), c[1] + r * math.sin(th)))
         tans.append((-math.sin(th), math.cos(th)))
     return pts, tans

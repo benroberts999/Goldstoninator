@@ -12,7 +12,10 @@ goldstoninator.py (same SVG, PDF and TikZ output, same grid of several diagrams)
 A term is a product of factors name(label) or name(label,label); a label (letters or digits) names a
 vertex, any label will do.  The factors are
     G(1,2)       internal line (Green's function): solid, no arrow.  G(1,1) is a closed loop (tadpole)
-    Q(1,2)       Coulomb line: wavy
+    Q(1,2)       Coulomb line: wavy, bowing gently outwards (curved=False draws them all straight)
+    Qs(1,2)      a Coulomb line drawn straight
+    Qu(1,2), Qd(1,2)  a Coulomb line bent upwards or downwards (left or right when it is vertical),
+                 for when the side chosen automatically is not the one wanted
     PI(1,2)      polarisation loop = G(1,2) G(2,1): two solid arcs (a bubble); also Pi, \\Pi
     v(1), w(2)   external lines (names v w x y): solid with an arrow.  The first one written comes in
                  at the top left, the second goes out at the right; at most one of each
@@ -27,7 +30,9 @@ it).  Placements are scored (lines through a vertex, overlapping and crossing li
 size, tilted bubbles) and the best one is drawn; lines between the same two vertices are bent into arcs
 on alternate sides, so lines never coincide.  A closed loop of G lines runs counterclockwise in the
 direction of propagation (G(a,b) goes from b to a): writing a loop the other way round mirrors it, which
-puts a vertex on the other side of the loop.  diagram(term).layout(cols=, rows=) sets the grid.
+puts a vertex on the other side of the loop.  A loop of three or more G lines is drawn round: the
+circle through its vertices (a rounded ring for more than three), so an insertion sits on the curve.
+diagram(term).layout(cols=, rows=) sets the grid.
 No dependencies beyond the standard library (and goldstoninator.py).
 """
 
@@ -40,10 +45,17 @@ import goldstoninator as gd
 EXT = "vwxy"  # names of the external lines
 GREEN = "G"  # the internal (fermion) line
 COULOMB = "Q"  # the Coulomb line
+COULOMB_STRAIGHT = "Qs"  # a Coulomb line drawn straight
+COULOMB_UP = "Qu"  # a Coulomb line bent upwards (to the left when it is vertical)
+COULOMB_DOWN = "Qd"  # ... downwards (to the right)
+COULOMBS = (COULOMB, COULOMB_STRAIGHT, COULOMB_UP, COULOMB_DOWN)
 POLAR = ("PI", "Pi", "\\Pi")  # names of the polarisation loop
 STYLES = {
     GREEN: "solid",
     COULOMB: "wavy",
+    COULOMB_STRAIGHT: "wavy",
+    COULOMB_UP: "wavy",
+    COULOMB_DOWN: "wavy",
 }  # name -> line style (two labels) or marker (one label)
 
 _F_RE = re.compile(
@@ -78,7 +90,9 @@ class Diagram(gd.Picture):
     LEG = 0.7  # length of the external legs
     LOOP = 0.3  # radius of a closed loop
 
-    def __init__(self, term, styles=None, ext=EXT, pad=0.35, straight=True):
+    def __init__(
+        self, term, styles=None, ext=EXT, pad=0.35, straight=True, curved=True
+    ):
         self.factors = parse_term(term)
         self.styles = dict(STYLES)
         self.styles.update(styles or {})
@@ -107,6 +121,7 @@ class Diagram(gd.Picture):
         self.vout = self.ext[1][1] if len(self.ext) > 1 else None
         self.chain = _chain(self.edges, self.vin, self.vout) if straight else []
         self.loops = _loops(self.edges)
+        self.curved = curved
         self.pos = {}
 
     def _term_str(self):
@@ -117,11 +132,12 @@ class Diagram(gd.Picture):
     # hold only some of the vertices while the layout is being built
     # ------------------------------------------------------------------------------------------
     def _pieces(self, pos):
-        """[(kind, data, style, points, ends, bent)]: kind/data = line (a, b) | arc (a, c, b) |
-        loop (c, r); points approximate the line (for the crossing tests); ends are the vertex
-        positions it is attached to; bent is the cost of drawing a single line as an arc to avoid
-        a vertex (0 when straight: 100 for a fermion line, which should never bend, 8 otherwise)
-        """
+        """[(kind, data, style, points, ends, bent)]: kind/data = line (a, b) | arc (a, c, b), a
+        Bezier arc with control point c | ring (c, r, t0, t1), a circular arc of a round loop |
+        loop (c, r), a line from a vertex to itself; points approximate the line (for the crossing
+        tests); ends are the vertex positions it is attached to; bent is the cost of a line that
+        does not run straight because a vertex is in the way (100 for a fermion line, which should
+        never bend, 8 otherwise)"""
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         pts = [P(v) for v in self.vertices if v in pos]
         cen = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
@@ -130,6 +146,7 @@ class Diagram(gd.Picture):
             if e[1] in pos and e[2] in pos:
                 groups.setdefault(frozenset(e[1:3]), []).append(e)
         out = []
+        rings = self._rings(pos, P)
         for key, members in groups.items():
             if (
                 len(key) == 1
@@ -171,28 +188,94 @@ class Diagram(gd.Picture):
                 levels = [0, 1, -1, 2, -2, 3, -3][:m]
             h = min(max(0.8 * gd._dist(a, b), 0.7), 1.2)
             for (name, _, _, st), k in zip(members, levels):
-                if k == 0:
-                    if m == 1 and _hits(
-                        [a, b], pts, (a, b)
-                    ):  # through a vertex: bend it
-                        arcs = [_arc(a, b, mid, n, s * h) for s in (far, -far)]
-                        c, poly = min(arcs, key=lambda cp: _hits(cp[1], pts, (a, b)))
-                        out.append(
-                            (
-                                "arc",
-                                (a, c, b),
-                                st,
-                                poly,
-                                (a, b),
-                                100 if name == GREEN else 8,
-                            )
-                        )
-                    else:
-                        out.append(("line", (a, b), st, [a, b], (a, b), 0))
-                else:
-                    c, poly = _arc(a, b, mid, n, far * k * h)
+                forced = name in (COULOMB_UP, COULOMB_DOWN)  # the side is prescribed
+                up = _side(
+                    n, (0.0, 0.0)
+                )  # the sign that bulges upwards (left when vertical)
+                side = (up if name == COULOMB_UP else -up) if forced else far
+                if k != 0:
+                    c, poly = _arc(
+                        a, b, mid, n, side * abs(k) * h if forced else far * k * h
+                    )
                     out.append(("arc", (a, c, b), st, poly, (a, b), 0))
+                    continue
+                through = _hits(
+                    [a, b], pts, (a, b)
+                )  # the straight line would pass a vertex
+                if m == 1 and key in rings:  # a line of a round loop
+                    c, r, t0, t1 = rings[key]
+                    poly = _ring_pts(c, r, t0, t1, 8)
+                    out.append(
+                        (
+                            "ring",
+                            (c, r, t0, t1),
+                            st,
+                            poly,
+                            (a, b),
+                            100 if through else 0,
+                        )
+                    )
+                elif (
+                    m == 1 and through
+                ):  # bend it round the vertex, the higher the longer it is
+                    hb = max(0.8, 0.35 * gd._dist(a, b))
+                    if forced:
+                        c, poly = _arc(a, b, mid, n, side * hb)
+                    else:
+                        arcs = [_arc(a, b, mid, n, s * hb) for s in (far, -far)]
+                        c, poly = min(arcs, key=lambda cp: _hits(cp[1], pts, (a, b)))
+                    out.append(
+                        (
+                            "arc",
+                            (a, c, b),
+                            st,
+                            poly,
+                            (a, b),
+                            100 if name == GREEN else 8,
+                        )
+                    )
+                elif m == 1 and (
+                    forced or (name == COULOMB and self.curved)
+                ):  # photons bow outwards
+                    c, poly = _arc(
+                        a, b, mid, n, side * min(max(0.4 * gd._dist(a, b), 0.35), 0.7)
+                    )
+                    out.append(("arc", (a, c, b), st, poly, (a, b), 0))
+                else:
+                    out.append(("line", (a, b), st, [a, b], (a, b), 0))
         return out
+
+    def _rings(self, pos, P):
+        """the G lines of the closed loops with three or more vertices, drawn as arcs of a circle:
+        {pair of vertices: (centre, radius, start angle, end angle)}.  Three vertices lie on the
+        circle through them; with more, every line is an arc of the loop's mean radius bulging
+        outwards (a rounded polygon)"""
+        rings = {}
+        for loop in self.loops:
+            if not all(v in pos for v in loop):
+                continue
+            q = [P(v) for v in loop]
+            cen = (sum(p[0] for p in q) / len(q), sum(p[1] for p in q) / len(q))
+            circle = _circumcircle(q[0], q[1], q[2]) if len(q) == 3 else None
+            if len(q) == 3 and circle is None:  # collinear: no circle
+                continue
+            for i in range(len(q)):
+                a, b = q[i], q[(i + 1) % len(q)]
+                if circle is not None:
+                    c, r = circle
+                    arc = _arc_avoiding(c, r, a, b, q[(i + 2) % 3])
+                else:
+                    L = gd._dist(a, b)
+                    r = max(sum(gd._dist(p, cen) for p in q) / len(q), L / 2 + 1e-6)
+                    mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                    d = gd._unit(a, b)
+                    nrm = (-d[1], d[0])
+                    inward = _side(nrm, (cen[0] - mid[0], cen[1] - mid[1]))
+                    k = math.sqrt(r * r - L * L / 4)
+                    c = (mid[0] + inward * k * nrm[0], mid[1] + inward * k * nrm[1])
+                    arc = _arc_avoiding(c, r, a, b, cen)
+                rings[frozenset((loop[i], loop[(i + 1) % len(q)]))] = arc
+        return rings
 
     def _legs(self, pos):
         """[(a, b)] of the external legs, drawn left to right"""
@@ -211,10 +294,12 @@ class Diagram(gd.Picture):
     # ------------------------------------------------------------------------------------------
     def _score(self, pos):
         """lower is better: 100 per line through a vertex or on top of another line, 10 per crossing,
-        100 per fermion line and 8 per other line bent round a vertex, the total length, 0.5 per unit
-        of width and 0.75 per unit of height, 0.75 per diagonal line and 2.5 per line at any other
-        angle, 3 per
-        bubble that does not lie flat or Coulomb line that is neither horizontal nor vertical, 20 per closed loop of G lines not running counterclockwise, 5 per vertex where a line continues straight into a line of another kind
+        10 per pair of lines that touch or nearly touch, 100 per fermion line and 8 per other line bent
+        round a vertex, the total length, 0.5 per unit of width and 0.75 per unit of height, 0.75 per
+        diagonal line and 2.5 per line at any other angle, 3 per bubble that does not lie flat, 5 per
+        Coulomb line that is neither horizontal nor vertical, 20 per closed loop of G lines not running
+        counterclockwise, 5 per vertex where a line continues straight into a line of another kind,
+        6 per unit the centre of a round loop is off the midpoint of its two attachment points
         """
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         pts = [P(v) for v in self.vertices if v in pos]
@@ -222,7 +307,7 @@ class Diagram(gd.Picture):
             ("leg", ab, "solid", list(ab), (ab[0] if ab[0] in pts else ab[1],), 0)
             for ab in self._legs(pos)
         ]
-        bad = cross = bent = 0
+        bad = cross = bent = touch = 0
         for _, _, _, poly, ends, b in pieces:
             bad += _hits(poly, pts, ends)
             bent += b
@@ -239,26 +324,51 @@ class Diagram(gd.Picture):
             )
             for _, _, _, poly, _, _ in pieces
         ]
+        ends_of = [set(e) for _, _, _, _, e, _ in pieces]
         for i in range(len(segs)):
             for j in range(i + 1, len(segs)):
                 if (
-                    box[i][2] < box[j][0]
-                    or box[j][2] < box[i][0]
-                    or box[i][3] < box[j][1]
-                    or box[j][3] < box[i][1]
+                    box[i][2] + 0.15 < box[j][0]
+                    or box[j][2] + 0.15 < box[i][0]
+                    or box[i][3] + 0.15 < box[j][1]
+                    or box[j][3] + 0.15 < box[i][1]
                 ):
                     continue
-                for a, b in segs[i]:
-                    for c, d in segs[j]:
+                shared = ends_of[i] & ends_of[j]
+                curved = (
+                    len(segs[i]) > 1 or len(segs[j]) > 1
+                )  # two straight lines cannot graze
+                near = [  # segments next to a vertex the two lines share: they touch there anyway
+                    [
+                        any(min(gd._dist(q, p) for q in seg) < 0.35 for p in shared)
+                        for seg in segs[k]
+                    ]
+                    for k in ((i, j) if curved else ())
+                ]
+                crossing = close = 0
+                for si, (a, b) in enumerate(segs[i]):
+                    for sj, (c, d) in enumerate(segs[j]):
                         if gd._proper_cross(a, b, c, d):
-                            cross += 1
+                            crossing += 1
                         elif gd._collinear_overlap(a, b, c, d):
                             bad += 1
+                        elif (
+                            curved
+                            and not (near[0][si] or near[1][sj])
+                            and min(a[0], b[0]) - 0.15 <= max(c[0], d[0])
+                            and min(c[0], d[0]) - 0.15 <= max(a[0], b[0])
+                            and min(a[1], b[1]) - 0.15 <= max(c[1], d[1])
+                            and min(c[1], d[1]) - 0.15 <= max(a[1], b[1])
+                            and _seg_gap(a, b, c, d) < 0.15
+                        ):
+                            close += 1  # grazing
+                cross += crossing
+                touch += not crossing and close > 0
         pairs = {}
         for name, u, v, _ in self.edges:
             if u != v and u in pos and v in pos:
                 pairs.setdefault(frozenset((u, v)), set()).add(name)
-        length = bends = tilted = 0.0
+        length = bends = tilted = askew = 0.0
         for key, names in pairs.items():  # every connected pair once
             u, v = key
             dx, dy = abs(pos[u][0] - pos[v][0]), abs(pos[u][1] - pos[v][1])
@@ -267,8 +377,8 @@ class Diagram(gd.Picture):
                 0.75 if dx == dy else 2.5 * (dx != 0 and dy != 0)
             )  # diagonal, or any other angle
             tilted += dy != 0 and any(nm in POLAR for nm in names)  # bubbles lie flat
-            tilted += (
-                dx != 0 and dy != 0 and COULOMB in names
+            askew += (
+                dx != 0 and dy != 0 and not names.isdisjoint(COULOMBS)
             )  # Coulomb lines run along an axis
         at = (
             {}
@@ -288,6 +398,31 @@ class Diagram(gd.Picture):
             for i, (n1, d1) in enumerate(lines):
                 for n2, d2 in lines[i + 1 :]:
                     through += n1 != n2 and d1[0] * d2[0] + d1[1] * d2[1] < -0.999
+        offset = 0.0  # a round loop hangs centred between its two attachment points
+        for loop in self.loops:
+            if len(loop) < 3 or not all(v in pos for v in loop):
+                continue
+            q = [P(v) for v in loop]
+            circle = _circumcircle(q[0], q[1], q[2]) if len(q) == 3 else None
+            centre = (
+                circle[0]
+                if circle
+                else (sum(p[0] for p in q) / len(q), sum(p[1] for p in q) / len(q))
+            )
+            hooks = [
+                P(v)
+                for v in loop
+                if any(
+                    (e[1] == v or e[2] == v)
+                    and (e[0] != GREEN or e[1] not in loop or e[2] not in loop)
+                    for e in self.edges
+                )
+            ]
+            if len(hooks) == 2:
+                offset += gd._dist(
+                    centre,
+                    ((hooks[0][0] + hooks[1][0]) / 2, (hooks[0][1] + hooks[1][1]) / 2),
+                )
         turned = 0
         for loop in self.loops:  # counterclockwise in the direction of propagation
             if all(v in pos for v in loop):
@@ -307,6 +442,9 @@ class Diagram(gd.Picture):
             + 0.75 * (max(ys) - min(ys))
             + 1.0 * bends
             + 3 * tilted
+            + 5 * askew
+            + 10 * touch
+            + 6 * offset
             + 20 * turned
             + 5 * through
         )
@@ -323,8 +461,8 @@ class Diagram(gd.Picture):
         k = len(chain)
         cmax = cols or max(2, n)
         rmax = rows or max(
-            2, (n + 2) // 4 + 1, 3 if self.loops else 0
-        )  # a loop's apex needs a row
+            2, (n + 2) // 4 + 1, 4 if self.loops else 0
+        )  # a round loop needs room
         if (
             vin is not None and vin == vout
         ):  # in and out at one vertex: everything in a column
@@ -434,10 +572,19 @@ class Diagram(gd.Picture):
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         g = {
             k: []
-            for k in ("int", "marker", "straight", "bubble", "loop", "labels", "arrows")
+            for k in (
+                "int",
+                "marker",
+                "straight",
+                "bubble",
+                "arc",
+                "loop",
+                "labels",
+                "arrows",
+            )
         }
         extent = [P(v) for v in self.vertices]
-        for kind, data, st, _, _, _ in self._pieces(pos):
+        for kind, data, st, poly, _, _ in self._pieces(pos):
             if kind == "line":
                 a, b = data
                 g["int"].append((a, b, st))
@@ -447,6 +594,9 @@ class Diagram(gd.Picture):
                 extent.append(
                     ((a[0] + 2 * c[0] + b[0]) / 4, (a[1] + 2 * c[1] + b[1]) / 4)
                 )
+            elif kind == "ring":
+                g["arc"].append(data + (st,))
+                extent += poly
             else:
                 c, r = data
                 g["loop"].append((c, r, st))
@@ -471,7 +621,8 @@ class Diagram(gd.Picture):
 
 
 def diagram(term, **kw):
-    """the Feynman diagram of a term (string or list of tuples); keywords: styles, ext, pad, straight"""
+    """the Feynman diagram of a term (string or list of tuples); keywords: styles, ext, pad, straight,
+    curved"""
     return term if isinstance(term, Diagram) else Diagram(term, **kw).layout()
 
 
@@ -566,6 +717,45 @@ def _hits(poly, pts, ends, eps=0.3):
         for q in pts
         if q not in ends
         and any(_seg_dist(q, poly[i], poly[i + 1]) < eps for i in range(len(poly) - 1))
+    )
+
+
+def _circumcircle(p, q, s):
+    """centre and radius of the circle through three points (None if they are collinear)"""
+    d = 2 * (p[0] * (q[1] - s[1]) + q[0] * (s[1] - p[1]) + s[0] * (p[1] - q[1]))
+    if abs(d) < 1e-9:
+        return None
+    p2, q2, s2 = p[0] ** 2 + p[1] ** 2, q[0] ** 2 + q[1] ** 2, s[0] ** 2 + s[1] ** 2
+    cx = (p2 * (q[1] - s[1]) + q2 * (s[1] - p[1]) + s2 * (p[1] - q[1])) / d
+    cy = (p2 * (s[0] - q[0]) + q2 * (p[0] - s[0]) + s2 * (q[0] - p[0])) / d
+    return (cx, cy), math.hypot(p[0] - cx, p[1] - cy)
+
+
+def _arc_avoiding(c, r, a, b, avoid):
+    """the arc of the circle (c, r) from a to b that does not pass the direction of the point
+    avoid: (c, r, t0, t1), counterclockwise from angle t0 to t1"""
+    ta, tb, tv = (math.atan2(p[1] - c[1], p[0] - c[0]) for p in (a, b, avoid))
+    sweep = (tb - ta) % (2 * math.pi)
+    if (tv - ta) % (2 * math.pi) < sweep:
+        return c, r, tb, tb + 2 * math.pi - sweep
+    return c, r, ta, ta + sweep
+
+
+def _ring_pts(c, r, t0, t1, n):
+    """an n-segment polyline along a circular arc"""
+    return [
+        (
+            c[0] + r * math.cos(t0 + (t1 - t0) * i / n),
+            c[1] + r * math.sin(t0 + (t1 - t0) * i / n),
+        )
+        for i in range(n + 1)
+    ]
+
+
+def _seg_gap(a, b, c, d):
+    """the distance between two segments that do not cross"""
+    return min(
+        _seg_dist(a, c, d), _seg_dist(b, c, d), _seg_dist(c, a, b), _seg_dist(d, a, b)
     )
 
 

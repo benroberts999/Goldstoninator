@@ -80,12 +80,15 @@ Integrals are written as `g_vbms`, `g_{vbms}`, `g[v,b,m,s]`, or as a list of tup
 * Integrals written in the opposite convention (`g_rspq`) are detected: the reading with the fewest flipped integrals is used.
 
 The diagram follows from the numerator alone. Every non-valence letter appears once as an out index (p, q) and once as an in index (r, s); particles are created before they are annihilated and holes are created before they are filled, which fixes the time order.
+One or two valence lines are allowed: `g_mnvw g_xymn` has `v`, `w` coming in and `x`, `y` going out (an effective two-body interaction).
 Time runs left to right, particle arrows point right and hole arrows left, and the incoming valence line enters at the top left.
+Along the valence line, particle lines are drawn horizontal and hole lines slope down to the left; closed loops are placed freely (a bubble is a lens).
 
 ### Energy denominators and sign
 
 One denominator per gap between successive vertices: the initial energy ε_v, plus the energies ω absorbed at the vertices before the gap, plus the energies of the hole lines crossing the gap, minus those of the particle lines (external valence legs count as particles).
 Each denominator is written with the valence energy first and positive, then ±ω. The sign is (−1)^(hole lines + closed loops), times the sign flips needed for that ordering.
+With two valence lines the initial energy is ε_v + ε_w, and the outgoing letters belong to the incoming ones in the order of the valence letters (`v` with `x`, `w` with `y`); a diagram whose open lines connect them the other way round, the exchange diagram, gets an extra minus sign.
 
 A one-body vertex is taken as *absorption* of an energy named after it (`t_rm` absorbs ω_t). The final valence energy never appears: energy conservation ε_w = ε_v + Σω removes it. So the two time orderings of a field vertex give ε_a − ε_n ± ω_t:
 
@@ -120,7 +123,7 @@ fd.grid(["v(1) G(1,2) w(2) Q(1,2)", "v(1) w(1) Q(1,2) G(2,2)"], ncols=2)
 A factor is `name(label)` or `name(label,label)`; the labels name the vertices, and any letters or digits will do.
 
 * `G(1,2)`: internal line (Green's function), solid, no arrow. `G(1,1)` is a closed loop (tadpole).
-* `Q(1,2)`: Coulomb line, wavy. Its ends need not touch anything else: `Q(1,2) T(2)` is a line to an external potential.
+* `Q(1,2)`: Coulomb line, wavy, drawn as a gentle arc; `Qs(1,2)` is a straight one (`curved=False` straightens them all). `Qu(1,2)` and `Qd(1,2)` bend up or down (left or right for a vertical line) when the automatic side is not what you want. Its ends need not touch anything else: `Q(1,2) T(2)` is a line to an external potential.
 * `PI(1,2)` (also `Pi`, `\Pi`): polarisation loop, `G(1,2) G(2,1)`, drawn as two arcs that never overlap.
 * `v(1)`, `w(2)` (names `v w x y`): external lines, with arrows. The first one written enters at the top left, the second leaves at the right; at most one of each.
 * Any other name with one label, `T(1)`, is a marker at that vertex (a cross by default); with two labels, `S(1,2)`, a dashed line. `styles={'T': 'dot', 'S': 'dotted', 'G': 'double'}` changes them, as for Goldstone diagrams.
@@ -129,4 +132,5 @@ Nothing is drawn at a plain vertex, and there are no labels.
 The vertices are placed on a small grid, the incoming vertex at the top left, the outgoing one at the right and the fermion line between them straight (`straight=False` frees it); every placement is scored (lines through a vertex, overlapping and crossing lines, length, size, bends, tilted bubbles) and the best one is drawn.
 Lines between the same two vertices are bent into arcs on alternate sides.
 A closed loop of `G` lines is drawn counterclockwise in the direction of propagation (`G(a,b)` runs from b to a), so writing the loop the other way round mirrors it: `G(3,i) t(i) G(i,6) G(6,3)` puts the insertion `i` on the upper line of the loop, `G(3,6) G(6,i) t(i) G(i,3)` on the lower one.
+A loop of three or more `G` lines is drawn as the circle through its vertices (a rounded ring for more than three), so an insertion sits on the curve.
 `fd.diagram(term).layout(cols=, rows=)` sets the grid when the automatic one is not what you want.
