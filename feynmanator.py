@@ -12,7 +12,11 @@ goldstoninator.py (same SVG, PDF and TikZ output, same grid of several diagrams)
 A term is a product of factors name(label) or name(label,label); a label (letters or digits) names a
 vertex, any label will do.  The factors are
     G(1,2)       internal line (Green's function): solid, no arrow.  G(1,1) is a closed loop (tadpole)
+    Gex(1,2)     the excited part of G: a line with two arrowheads;  Pa(1,2): the core projector |a><a|: double line.
+                 Both count as fermion lines for the layout (straight line, loops), like G
     Q(1,2)       Coulomb line: wavy, bowing gently outwards (curved=False draws them all straight)
+                 vertical=('Qi', ...) forces the lines of those names to run vertically (needs straight=False
+                 when they join two vertices of the fermion line)
     Qs(1,2)      a Coulomb line drawn straight
     Qu(1,2), Qd(1,2)  a Coulomb line bent upwards or downwards (left or right when it is vertical),
                  for when the side chosen automatically is not the one wanted
@@ -22,7 +26,8 @@ vertex, any label will do.  The factors are
     T(1)         any other name with one label: a marker at that vertex (a cross; styles={'T': 'dot'})
     S(1,2)       any other name with two labels: a dashed line (styles={'S': 'dotted'})
 Nothing is drawn at a plain vertex and there are no labels.  Line styles: wavy, dashed, dotted, double,
-solid (styles={'G': 'double'} for dressed propagators); markers: x (= cross), dot, circle, square.
+solid, arrow and arrows (solid with one filled or two open arrowheads at the middle, pointing from the first label to
+the second; styles={'G': 'double'} for dressed propagators); markers: x (= cross), dot, circle, square.
 
 Layout: the vertices go on a small grid, with the incoming vertex at the top left, the outgoing one rightmost
 and the fermion line (the G lines from one to the other) straight, left to right (straight=False frees
@@ -44,14 +49,18 @@ import goldstoninator as gd
 
 EXT = "vwxy"  # names of the external lines
 GREEN = "G"  # the internal (fermion) line
+FERMIONS = (GREEN, "Gex", "Pa")  # names laid out as fermion lines: G, its excited part, the core projector
 COULOMB = "Q"  # the Coulomb line
 COULOMB_STRAIGHT = "Qs"  # a Coulomb line drawn straight
 COULOMB_UP = "Qu"  # a Coulomb line bent upwards (to the left when it is vertical)
 COULOMB_DOWN = "Qd"  # ... downwards (to the right)
 COULOMBS = (COULOMB, COULOMB_STRAIGHT, COULOMB_UP, COULOMB_DOWN)
+ARROWS = {"arrow": 1, "arrows": 2}  # line styles drawn solid with one filled or two open arrowheads at the middle
 POLAR = ("PI", "Pi", "\\Pi")  # names of the polarisation loop
 STYLES = {
     GREEN: "solid",
+    "Gex": "arrows",
+    "Pa": "double",
     COULOMB: "wavy",
     COULOMB_STRAIGHT: "wavy",
     COULOMB_UP: "wavy",
@@ -91,9 +100,10 @@ class Diagram(gd.Picture):
     LOOP = 0.3  # radius of a closed loop
 
     def __init__(
-        self, term, styles=None, ext=EXT, pad=0.35, straight=True, curved=True
+        self, term, styles=None, ext=EXT, pad=0.35, straight=True, curved=True, vertical=()
     ):
         self.factors = parse_term(term)
+        self.vertical = set(vertical)  # names of lines that must run vertically
         self.styles = dict(STYLES)
         self.styles.update(styles or {})
         self.pad = pad
@@ -132,12 +142,13 @@ class Diagram(gd.Picture):
     # hold only some of the vertices while the layout is being built
     # ------------------------------------------------------------------------------------------
     def _pieces(self, pos):
-        """[(kind, data, style, points, ends, bent)]: kind/data = line (a, b) | arc (a, c, b), a
+        """[(kind, data, style, points, ends, bent, dirn)]: kind/data = line (a, b) | arc (a, c, b), a
         Bezier arc with control point c | ring (c, r, t0, t1), a circular arc of a round loop |
         loop (c, r), a line from a vertex to itself; points approximate the line (for the crossing
         tests); ends are the vertex positions it is attached to; bent is the cost of a line that
         does not run straight because a vertex is in the way (100 for a fermion line, which should
-        never bend, 8 otherwise)"""
+        never bend, 8 otherwise); dirn = (position of the first label, of the second), None for a loop at
+        one vertex"""
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         pts = [P(v) for v in self.vertices if v in pos]
         cen = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
@@ -168,6 +179,7 @@ class Diagram(gd.Picture):
                             gd._circle(c, self.LOOP, 12)[0],
                             (p,),
                             0,
+                            None,
                         )
                     )
                 continue
@@ -177,7 +189,7 @@ class Diagram(gd.Picture):
             mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
             far = _side(n, (mid[0] - cen[0], mid[1] - cen[1]))
             members = sorted(
-                members, key=lambda e: e[0] != GREEN
+                members, key=lambda e: e[0] not in FERMIONS
             )  # the fermion line goes straight
             m = len(members)
             if (
@@ -187,7 +199,8 @@ class Diagram(gd.Picture):
             else:
                 levels = [0, 1, -1, 2, -2, 3, -3][:m]
             h = min(max(0.8 * gd._dist(a, b), 0.7), 1.2)
-            for (name, _, _, st), k in zip(members, levels):
+            for (name, u, v, st), k in zip(members, levels):
+                dirn = (P(u), P(v))
                 forced = name in (COULOMB_UP, COULOMB_DOWN)  # the side is prescribed
                 up = _side(
                     n, (0.0, 0.0)
@@ -197,7 +210,7 @@ class Diagram(gd.Picture):
                     c, poly = _arc(
                         a, b, mid, n, side * abs(k) * h if forced else far * k * h
                     )
-                    out.append(("arc", (a, c, b), st, poly, (a, b), 0))
+                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn))
                     continue
                 through = _hits(
                     [a, b], pts, (a, b)
@@ -213,6 +226,7 @@ class Diagram(gd.Picture):
                             poly,
                             (a, b),
                             100 if through else 0,
+                            dirn,
                         )
                     )
                 elif (
@@ -231,7 +245,8 @@ class Diagram(gd.Picture):
                             st,
                             poly,
                             (a, b),
-                            100 if name == GREEN else 8,
+                            100 if name in FERMIONS else 8,
+                            dirn,
                         )
                     )
                 elif m == 1 and (
@@ -240,9 +255,9 @@ class Diagram(gd.Picture):
                     c, poly = _arc(
                         a, b, mid, n, side * min(max(0.4 * gd._dist(a, b), 0.35), 0.7)
                     )
-                    out.append(("arc", (a, c, b), st, poly, (a, b), 0))
+                    out.append(("arc", (a, c, b), st, poly, (a, b), 0, dirn))
                 else:
-                    out.append(("line", (a, b), st, [a, b], (a, b), 0))
+                    out.append(("line", (a, b), st, [a, b], (a, b), 0, dirn))
         return out
 
     def _rings(self, pos, P):
@@ -304,16 +319,16 @@ class Diagram(gd.Picture):
         P = lambda v: (float(pos[v][0]), float(pos[v][1]))
         pts = [P(v) for v in self.vertices if v in pos]
         pieces = self._pieces(pos) + [
-            ("leg", ab, "solid", list(ab), (ab[0] if ab[0] in pts else ab[1],), 0)
+            ("leg", ab, "solid", list(ab), (ab[0] if ab[0] in pts else ab[1],), 0, None)
             for ab in self._legs(pos)
         ]
         bad = cross = bent = touch = 0
-        for _, _, _, poly, ends, b in pieces:
+        for _, _, _, poly, ends, b, _ in pieces:
             bad += _hits(poly, pts, ends)
             bent += b
         segs = [
             [(poly[i], poly[i + 1]) for i in range(len(poly) - 1)]
-            for _, _, _, poly, _, _ in pieces
+            for _, _, _, poly, _, _, _ in pieces
         ]
         box = [
             (
@@ -322,9 +337,9 @@ class Diagram(gd.Picture):
                 max(p[0] for p in poly),
                 max(p[1] for p in poly),
             )
-            for _, _, _, poly, _, _ in pieces
+            for _, _, _, poly, _, _, _ in pieces
         ]
-        ends_of = [set(e) for _, _, _, _, e, _ in pieces]
+        ends_of = [set(e) for _, _, _, _, e, _, _ in pieces]
         for i in range(len(segs)):
             for j in range(i + 1, len(segs)):
                 if (
@@ -368,7 +383,7 @@ class Diagram(gd.Picture):
         for name, u, v, _ in self.edges:
             if u != v and u in pos and v in pos:
                 pairs.setdefault(frozenset((u, v)), set()).add(name)
-        length = bends = tilted = askew = 0.0
+        length = bends = tilted = askew = upright = 0.0
         for key, names in pairs.items():  # every connected pair once
             u, v = key
             dx, dy = abs(pos[u][0] - pos[v][0]), abs(pos[u][1] - pos[v][1])
@@ -380,6 +395,7 @@ class Diagram(gd.Picture):
             askew += (
                 dx != 0 and dy != 0 and not names.isdisjoint(COULOMBS)
             )  # Coulomb lines run along an axis
+            upright += dx != 0 and not names.isdisjoint(self.vertical)  # forced vertical lines
         at = (
             {}
         )  # vertex -> [(name, direction)] of the single straight lines meeting there
@@ -414,7 +430,7 @@ class Diagram(gd.Picture):
                 for v in loop
                 if any(
                     (e[1] == v or e[2] == v)
-                    and (e[0] != GREEN or e[1] not in loop or e[2] not in loop)
+                    and (e[0] not in FERMIONS or e[1] not in loop or e[2] not in loop)
                     for e in self.edges
                 )
             ]
@@ -443,6 +459,7 @@ class Diagram(gd.Picture):
             + 1.0 * bends
             + 3 * tilted
             + 5 * askew
+            + 1000 * upright
             + 10 * touch
             + 6 * offset
             + 20 * turned
@@ -581,10 +598,15 @@ class Diagram(gd.Picture):
                 "loop",
                 "labels",
                 "arrows",
+                "openarrows",
             )
         }
         extent = [P(v) for v in self.vertices]
-        for kind, data, st, poly, _, _ in self._pieces(pos):
+        for kind, data, st, poly, _, _, dirn in self._pieces(pos):
+            if st in ARROWS and dirn is not None:  # one filled head, or two open ones
+                g["arrows" if ARROWS[st] == 1 else "openarrows"] += _heads(poly, dirn, ARROWS[st])
+            if st in ARROWS:
+                st = "solid"
             if kind == "line":
                 a, b = data
                 g["int"].append((a, b, st))
@@ -622,7 +644,7 @@ class Diagram(gd.Picture):
 
 def diagram(term, **kw):
     """the Feynman diagram of a term (string or list of tuples); keywords: styles, ext, pad, straight,
-    curved"""
+    curved, vertical"""
     return term if isinstance(term, Diagram) else Diagram(term, **kw).layout()
 
 
@@ -635,12 +657,12 @@ def grid(terms, ncols=3, scale=40.0, gap=6.0, **kw):
 # helpers
 # ----------------------------------------------------------------------------------------------
 def _chain(edges, vin, vout):
-    """the fermion line: a path of G lines from the incoming to the outgoing vertex ([] if none)"""
+    """the fermion line: a path of fermion lines (G, Gex, Pa) from the incoming to the outgoing vertex ([] if none)"""
     if vin is None or vout is None:
         return []
     adj = {}
     for name, u, v, _ in edges:
-        if name == GREEN and u != v:
+        if name in FERMIONS and u != v:
             adj.setdefault(u, []).append(v)
             adj.setdefault(v, []).append(u)
 
@@ -658,12 +680,12 @@ def _chain(edges, vin, vout):
 
 
 def _loops(edges):
-    """the closed loops of G lines, each as its vertices in the direction of propagation (G(a,b)
+    """the closed loops of fermion lines (G, Gex, Pa), each as its vertices in the direction of propagation (G(a,b)
     runs from b to a); a loop of two lines (a bubble) is left out, so is a line from a vertex to
     itself"""
     nxt, order = {}, {}
     for name, u, v, _ in edges:
-        if name == GREEN and u != v:
+        if name in FERMIONS and u != v:
             nxt.setdefault(v, []).append(u)
             order.setdefault(v, len(order))
             order.setdefault(u, len(order))
@@ -680,6 +702,23 @@ def _loops(edges):
     for start in nxt:
         walk([start])
     return loops
+
+
+def _heads(poly, dirn, n):
+    """[(point, direction)] of n arrowheads at the middle of a line (its points), pointing from the
+    first label to the second (dirn)"""
+    if gd._dist(poly[0], dirn[0]) > gd._dist(poly[-1], dirn[0]):
+        poly = poly[::-1]
+    L = [0.0]
+    for p, q in zip(poly, poly[1:]):
+        L.append(L[-1] + gd._dist(p, q))
+    out = []
+    for s in [L[-1] / 2] if n == 1 else [L[-1] / 2 - 0.1, L[-1] / 2 + 0.1]:
+        k = max(1, min(len(L) - 1, next((i for i, l in enumerate(L) if l >= s), len(L) - 1)))
+        p, q = poly[k - 1], poly[k]
+        f = (s - L[k - 1]) / (L[k] - L[k - 1]) if L[k] > L[k - 1] else 0.0
+        out.append(((p[0] + f * (q[0] - p[0]), p[1] + f * (q[1] - p[1])), gd._unit(p, q)))
+    return out
 
 
 def _arc(a, b, mid, n, h):

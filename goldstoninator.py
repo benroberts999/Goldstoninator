@@ -268,6 +268,12 @@ class Picture:
                 '<polygon fill="black" points="%s"/>'
                 % " ".join("%.1f,%.1f" % T(q) for q in _arrowhead(p, d))
             )
+        for p, d in g.get("openarrows", []):  # unfilled head: a V, stroked
+            tip, l, r = _arrowhead(p, d)
+            el.append(
+                '<polyline fill="none" stroke="black" stroke-width="1.2" points="%s"/>'
+                % " ".join("%.1f,%.1f" % T(q) for q in (l, tip, r))
+            )
         for lab, p in g["labels"]:
             el.append(
                 '<text x="%.1f" y="%.1f" font-family="serif" font-style="italic" font-size="%.0f" '
@@ -359,6 +365,9 @@ class Picture:
         for p, d in g["arrows"]:
             q = [T(v) for v in _arrowhead(p, d)]
             el.append("%.2f %.2f m %.2f %.2f l %.2f %.2f l f" % (q[0] + q[1] + q[2]))
+        for p, d in g.get("openarrows", []):
+            tip, l, r = [T(v) for v in _arrowhead(p, d)]
+            el.append("%.2f %.2f m %.2f %.2f l %.2f %.2f l S" % (l + tip + r))
         fs = 0.4 * scale
         for lab, p in g["labels"]:
             px, py = T(p)
@@ -434,6 +443,9 @@ class Picture:
                 "\\fill %s -- %s -- %s -- cycle;"
                 % tuple(C(q) for q in _arrowhead(p, d))
             )
+        for p, d in g.get("openarrows", []):
+            tip, l, r = _arrowhead(p, d)
+            el.append("\\draw %s -- %s -- %s;" % (C(l), C(tip), C(r)))
         for lab, p in g["labels"]:
             el.append("\\node at %s {$%s$};" % (C(p), lab))
         return "\n".join(el)
@@ -1002,6 +1014,7 @@ class Diagram(Picture):
         g["bubble"] = [(R(a), R(c), R(b), st) for a, c, b, st in g["bubble"]]
         g["loop"] = [(R(c), r, st) for c, r, st in g["loop"]]
         g["arrows"] = [(R(p), R(d)) for p, d in g["arrows"]]
+        g["openarrows"] = [(R(p), R(d)) for p, d in g.get("openarrows", [])]
         g["labels"] = [(l, R(p)) for l, p in g["labels"]]
         extent = [R(p) for p in extent]
         xs = [p[0] for p in extent]
