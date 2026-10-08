@@ -1198,10 +1198,24 @@ class Equation(str):
         return "$$%s$$" % self
 
 
+def several(term):
+    """whether term is a list of terms (strings or diagrams) rather than one term (a string, or a list
+    of tuples)"""
+    return (
+        isinstance(term, (list, tuple))
+        and bool(term)
+        and all(isinstance(t, (str, Picture)) for t in term)
+    )
+
+
 def diagram(term, **kw):
-    """the diagram of one term (string or list of integrals); keywords: styles, pad, omega, labels, scale,
-    font,
+    """the diagram of one term (string or list of integrals), or, for a list of terms, a Grid of
+    them as grid() gives (ncols=, gap=); keywords: styles, pad, omega, labels, scale, font,
     core/exc/val, types"""
+    if several(term):
+        return grid(term, **kw)
+    kw.pop("ncols", None)
+    kw.pop("gap", None)
     if isinstance(term, Diagram):
         return term
     return Diagram(term, **kw).layout()

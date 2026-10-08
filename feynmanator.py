@@ -8,6 +8,7 @@ goldstoninator.py (same SVG, PDF and TikZ output, same grid of several diagrams)
     d                                             # the picture, as the last line of a Jupyter cell
     print(d.tikz())                               # TikZ source;  d.save('fig.svg' / '.pdf' / '.tikz' / '.tex')
     fd.grid(["v(1) w(1) Q(1,2) G(2,2)", "v(1) G(1,2) w(2) Q(1,2)"], ncols=2)   # side by side
+    fd.diagram([...], ncols=2)                    # the same: a list of terms gives the grid
 
 A term is a product of factors name(label) or name(label,label); a label (letters or digits) names a
 vertex, any label will do.  The factors are
@@ -49,8 +50,8 @@ for repeated names), each interaction line that conservation leaves free carries
 (omega_1, omega_2, ... in the order written, plain omega when there is one; the two Coulomb lines round
 a bubble share theirs) and each closed fermion loop an eps' (eps'', ...); the fermion lines then read
 eps_v - omega and so on, the outgoing leg eps_v + omega_T.  diagram(term).energies() lists them as LaTeX.
-Goldstone diagrams: goldstone(term) draws the Goldstone diagrams of a Feynman term, one per time ordering of
-its interactions (Coulomb lines and markers), as a goldstoninator Grid, so .equation() is their sum with
+Goldstone diagrams: goldstone(term) draws the Goldstone diagrams of a Feynman term (or of each term of a
+list), one per time ordering of its interactions (Coulomb lines and markers), as a goldstoninator Grid, so .equation() is their sum with
 signs and energy denominators; diagram(term).goldstone_terms() gives the terms.  A Coulomb line Q(i,j)
 becomes g_{pqrs} from the fermion lines at its ends, a marker T(i) the one-body T_{pr}; a fermion line
 forward in time is a particle, backward (or within one interaction) a hole; Gex only forward, Pa only
@@ -1025,15 +1026,25 @@ class Diagram(gd.Picture):
         return g
 
 def diagram(term, **kw):
-    """the Feynman diagram of a term (string or list of tuples); keywords: styles, ext, pad, straight,
-    curved, vertical, energies, scale (pixels per unit), font (label size in points)"""
+    """the Feynman diagram of a term (string or list of tuples), or, for a list of terms, a grid of
+    them as grid() gives (ncols=, gap=); keywords: styles, ext, pad, straight, curved, vertical,
+    energies, scale (pixels per unit), font (label size in points)"""
+    if gd.several(term):
+        return grid(term, **kw)
+    kw.pop("ncols", None)
+    kw.pop("gap", None)
     return term if isinstance(term, Diagram) else Diagram(term, **kw).layout()
 
 
 def goldstone(term, ncols=3, **kw):
-    """the Goldstone diagrams of a Feynman term, one per time ordering of its interactions: a
-    goldstoninator Grid (see Diagram.goldstone_terms for the rules); keywords go to gd.diagram"""
-    return Diagram(term).goldstone(ncols=ncols, **kw)
+    """the Goldstone diagrams of a Feynman term, one per time ordering of its interactions, or of
+    each of a list of terms, all in one goldstoninator Grid (see Diagram.goldstone_terms for the
+    rules); keywords go to gd.diagram"""
+    terms = term if gd.several(term) else [term]
+    grids = [
+        (t if isinstance(t, Diagram) else Diagram(t)).goldstone(ncols=ncols, **kw) for t in terms
+    ]
+    return gd.Grid([d for g in grids for d in g.diagrams], ncols=ncols)
 
 
 def grid(terms, ncols=3, scale=None, gap=6.0, **kw):

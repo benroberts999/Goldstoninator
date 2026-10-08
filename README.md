@@ -66,6 +66,8 @@ g                                 # the pictures
 g.equation()                      # the sum; g.tex(), g.tikz(), g.save(...) as above
 ```
 
+`gd.diagram` with a list of terms does the same as `gd.grid` (and `fd.diagram`, `fd.goldstone` likewise).
+
 ## Reference
 
 ### Writing a term
@@ -155,6 +157,7 @@ A loop of three or more `G` lines is drawn as the circle through its vertices (a
 g = fd.goldstone("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)")   # the two time orderings of the direct term
 g                                                            # the Goldstone pictures
 g.equation()                                                 # their sum, with denominators
+fd.goldstone([direct, exchange], ncols=4).equation()         # several Feynman terms: all their Goldstone diagrams in one grid
 fd.diagram("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)").goldstone_terms()   # ['g_{mnva} g_{avnm}', 'g_{mvba} g_{abvm}']
 ```
 
