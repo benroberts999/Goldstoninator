@@ -25,7 +25,8 @@ Antisymmetrised integrals are not accepted: expand g~_pqrs = g_pqrs - g_pqsr fir
 
 Time runs left to right, the incoming valence line enters at the top left; along the valence line
 particle lines are horizontal and hole lines slope down to the left (closed loops are placed freely,
-a bubble is a lens).  If some integrals are
+a bubble is a lens, and a line from one end of an interaction to the other, as in the exchange g_vaav,
+makes a loop with it, half each).  If some integrals are
 written in the opposite convention (g_{rspq}) this is detected: the reading in which the fewest
 integrals are flipped is used (flipping all of them is the time-reversed diagram).
 
@@ -77,10 +78,15 @@ from typing import List, Sequence, Tuple, Union, overload
 CORE = "abcdef"
 EXC = "mnrspqtu"
 VAL = "vwxy"
-STYLES = {"g": "wavy", "X": "doublewavy"}  # interaction name -> line style (two-body) or marker (one-body)
+STYLES = {
+    "g": "wavy",
+    "X": "doublewavy",
+}  # interaction name -> line style (two-body) or marker (one-body)
 DEFAULT_STYLE = "dashed"
 DEFAULT_MARKER = "x"
-DOUBLE = 0.045  # half the distance between the two strokes of a double or doublewavy line
+DOUBLE = (
+    0.045  # half the distance between the two strokes of a double or doublewavy line
+)
 EPS = r"\varepsilon"  # orbital-energy symbol in tex()
 OMEGA = r"\omega"  # symbol of the energy absorbed at a vertex, subscripted by the vertex name
 TIKZ_PREAMBLE = "\\documentclass[tikz,border=2pt]{standalone}\n\\usetikzlibrary{decorations.pathmorphing}\n"
@@ -170,7 +176,8 @@ class Picture:
         bbox     [x0, y0, x1, y1]
     svg(), pdf(), tikz() and save() draw it; _repr_svg_ shows it inline in Jupyter.  scale is the
     size of the picture (pixels per diagram unit in the SVG and PDF), font the size of the labels in
-    points (None: 0.4 of a unit, so that they scale with the picture; in TikZ, the document font)."""
+    points (None: 0.4 of a unit, so that they scale with the picture; in TikZ, the document font).
+    """
 
     scale = 40.0
     font = None
@@ -217,7 +224,14 @@ class Picture:
             if fill == "shaded":
                 el.append(
                     '<path d="M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f Q%.1f,%.1f %.1f,%.1f Z" fill="#%s" stroke="none"/>'
-                    % (T(a) + T(c1) + T(b) + T(c2) + T(a) + ("%02x" % round(255 * _GREY) * 3,))
+                    % (
+                        T(a)
+                        + T(c1)
+                        + T(b)
+                        + T(c2)
+                        + T(a)
+                        + ("%02x" % round(255 * _GREY) * 3,)
+                    )
                 )
             else:
                 for p, q in _lens_hatch(a, c1, b, c2, fill):
@@ -459,14 +473,26 @@ class Picture:
                 q3, q4 = _q2c(b, c2, a)
                 el.append(
                     "\\fill[black!%d] %s .. controls %s and %s .. %s .. controls %s and %s .. %s -- cycle;"
-                    % (round(100 * (1 - _GREY)), C(a), C(q1), C(q2), C(b), C(q3), C(q4), C(a))
+                    % (
+                        round(100 * (1 - _GREY)),
+                        C(a),
+                        C(q1),
+                        C(q2),
+                        C(b),
+                        C(q3),
+                        C(q4),
+                        C(a),
+                    )
                 )
             else:
                 segs = _lens_hatch(a, c1, b, c2, fill)
                 if segs:
                     el.append(
                         "\\draw[line width=%spt] %s;"
-                        % (_num(0.5 * unit), " ".join("%s -- %s" % (C(p), C(q)) for p, q in segs))
+                        % (
+                            _num(0.5 * unit),
+                            " ".join("%s -- %s" % (C(p), C(q)) for p, q in segs),
+                        )
                     )
         for a, b, style in g["int"]:
             el.append("\\draw%s %s -- %s;" % (_tikz_opt(style, unit), C(a), C(b)))
@@ -876,7 +902,9 @@ class Diagram(Picture):
         seen = set()
         for _, kind, a, b in self.lines:
             key = frozenset([a, b])
-            if a != b and key not in seen:
+            if (
+                a[0] != b[0] and key not in seen
+            ):  # (between the ends of one interaction: drawn round it)
                 seen.add(key)
                 segs.append((P(a), P(b)))
         segs += [(a, b) for a, b, _, _ in self._legs(x)]
@@ -1012,7 +1040,19 @@ class Diagram(Picture):
                 g["labels"].append((text, p))
                 extent.extend(room or (p,))
 
+        pairs = {}
+        for x_, kind, a, b in self.lines:
+            pairs.setdefault(frozenset([a, b]), []).append((x_, kind, a, b))
+        # an interaction with a single line from one of its ends to the other (exchange, g_vaav) is
+        # drawn as a loop: one half the interaction, the other the line
+        curl = {
+            m[0][2][0]
+            for key, m in pairs.items()
+            if len(key) == 2 and len(m) == 1 and m[0][2][0] == m[0][3][0]
+        }
         for k, v in enumerate(self.verts):
+            if k in curl:
+                continue
             if v[1] is not None:
                 g["int"].append(
                     (
@@ -1029,9 +1069,6 @@ class Diagram(Picture):
         extent += pts
         cx = sum(p[0] for p in pts) / len(pts)
         cy = sum(p[1] for p in pts) / len(pts)
-        pairs = {}
-        for x_, kind, a, b in self.lines:
-            pairs.setdefault(frozenset([a, b]), []).append((x_, kind, a, b))
         for key, members in pairs.items():
             if len(key) == 1:  # line from an end to itself
                 (e,) = key
@@ -1044,6 +1081,34 @@ class Diagram(Picture):
                     (c[0] + (0.55 if self.labels else 0.3), c[1] + 0.3),
                     (c[0], c[1] - 0.3),
                 ]
+            elif (
+                len(members) == 1 and members[0][2][0] == members[0][3][0]
+            ):  # curl: a loop
+                x_, kind, a, b = members[0]
+                k = a[0]
+                pa, pb = P(a), P(b)
+                mid = ((pa[0] + pb[0]) / 2, pa[1])
+                h = 0.8 * min(_dist(pa, pb), 1.0)  # as a bubble
+                at = lambda t: (
+                    mid[0],
+                    mid[1] + t,
+                )  # both ends at the same time: bulge along it
+                sgn = 1 if _dist(at(1), (cx, cy)) >= _dist(at(-1), (cx, cy)) else -1
+                g["bubble"].append(
+                    (pa, at(sgn * h), pb, "solid")
+                )  # line away from the centre
+                g["bubble"].append(
+                    (
+                        P((k, 0)),
+                        at(-sgn * h),
+                        P((k, 1)),
+                        self.styles.get(self.names[k], DEFAULT_STYLE),
+                    )
+                )
+                top = at(sgn * h / 2)
+                g["arrows"].append((top, _unit(pa, pb)))
+                label(x_, at(sgn * (h / 2 + 0.2)))
+                extent += [top, at(-sgn * h / 2)]
             elif len(members) == 1:
                 x_, kind, a, b = members[0]
                 pa, pb = P(a), P(b)
@@ -1080,14 +1145,20 @@ class Diagram(Picture):
                     sgn = 1 if bulge > 0 else -1
                     lab = (top[0] + 0.2 * sgn * nrm[0], top[1] + 0.2 * sgn * nrm[1])
                     label(x_, lab)
-        for a, b, letter, incoming in self._legs(x):
+        for (_, e), (a, b, letter, incoming) in zip(
+            self.vins + self.vouts, self._legs(x)
+        ):
             g["straight"].append((a, b))
             g["arrows"].append((((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), (0.0, 1.0)))
             extent += [a, b]
+            k = e[
+                0
+            ]  # label above the leg, below it when the leg leaves the lower end of a loop
+            r = 0.2 if k in curl and x[(k, 1 - e[1])] < x[e] else -0.2
             if incoming:
-                label(letter, (a[0] - 0.2, a[1] + 0.35), (a[0] - 0.2, a[1]))
+                label(letter, (a[0] + r, a[1] + 0.35), (a[0] + r, a[1]))
             else:
-                label(letter, (b[0] - 0.2, b[1] - 0.35), (b[0] - 0.2, b[1]))
+                label(letter, (b[0] + r, b[1] - 0.35), (b[0] + r, b[1]))
         R = lambda p: (p[1], -p[0])  # rotate: time -> x (left to right), row 0 -> top
         g["int"] = [(R(a), R(b), st) for a, b, st in g["int"]]
         g["marker"] = [(R(p), st) for p, st in g["marker"]]
@@ -1238,7 +1309,12 @@ def diagram(term, **kw):
 def grid(terms, ncols=3, scale=None, gap=6.0, **kw):
     """diagrams of several terms side by side (shown inline in Jupyter; .tex(), .equation(), .tikz(),
     .save('x.svg'/'x.pdf'/'x.tikz'/'x.tex')); keywords as for diagram()"""
-    return Grid([diagram(t, scale=scale, **kw) for t in terms], ncols=ncols, scale=scale, gap=gap)
+    return Grid(
+        [diagram(t, scale=scale, **kw) for t in terms],
+        ncols=ncols,
+        scale=scale,
+        gap=gap,
+    )
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1289,7 +1365,8 @@ def _tikz_standalone(body):
 def _svg_wrap(body, W, H):
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">\n'
-        '<rect width="100%%" height="100%%" fill="white"/>\n%s\n</svg>' % (W, H, W, H, body)
+        '<rect width="100%%" height="100%%" fill="white"/>\n%s\n</svg>'
+        % (W, H, W, H, body)
     )
 
 
@@ -1304,7 +1381,9 @@ def _pdf_wrap(body, W, H):
         % (W, H, " /F2 6 0 R" if "/F2" in body else ""),
         "<< /Length %d >>\nstream\n%s\nendstream" % (len(body.encode("latin-1")), body),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic >>",
-    ] + (["<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>"] if "/F2" in body else [])
+    ] + (
+        ["<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>"] if "/F2" in body else []
+    )
     out = b"%PDF-1.4\n"
     offsets = []
     for i, o in enumerate(objs):
@@ -1469,7 +1548,8 @@ _EM = {"it": 0.5, "greek": 0.55, "rm": 0.5}  # width of a character, in em
 
 def _label_tokens(text):
     """[(text, kind, level)] of a label (see above); braces group, _ and ^ shift the level of the next
-    character or group, \\, and spaces are dropped, an unknown \\command shows its name upright"""
+    character or group, \\, and spaces are dropped, an unknown \\command shows its name upright
+    """
     out, stack, level, pending, i = [], [], 0, None, 0
 
     def emit(piece, kind):
@@ -1598,7 +1678,8 @@ def _q2c(a, c, b):
 
 def _hatch(poly, spacing=0.1, angle=45.0):
     """the segments [(p, q)] of the parallel lines at the given angle (degrees), spacing apart (in
-    absolute position, so adjacent regions hatch in phase), that lie inside the closed polygon poly"""
+    absolute position, so adjacent regions hatch in phase), that lie inside the closed polygon poly
+    """
     d = (math.cos(math.radians(angle)), math.sin(math.radians(angle)))
     n = (-d[1], d[0])
     s = [p[0] * n[0] + p[1] * n[1] for p in poly]  # across the lines
