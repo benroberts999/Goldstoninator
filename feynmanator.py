@@ -33,6 +33,8 @@ vertex, any label will do.  The factors are
 Nothing is drawn at a plain vertex and there are no labels (but see Energies).  Line styles: wavy, doublewavy, dashed, dotted,
 double, solid, arrow and arrows (solid with one filled or two open arrowheads at the middle, pointing from the first label to
 the second; styles={'G': 'double'} for dressed propagators); markers: x (= cross), dot, circle, square.
+styles={...} sets them for one picture, fd.STYLES['Q'] = 'dashed' for the session (Qs, Qu, Qd have their
+own entries); pad= adds margin round the picture.
 
 Layout: the vertices go on a small grid, with the incoming vertex at the top left, the outgoing one rightmost
 and the fermion line (the G lines from one to the other) straight, left to right (straight=False frees
@@ -66,6 +68,7 @@ import itertools
 import math
 import re
 from fractions import Fraction
+from typing import List, Sequence, Union, overload
 
 import goldstoninator as gd
 
@@ -751,8 +754,8 @@ class Diagram(gd.Picture):
         goldstoninator Grid (shown inline; .equation() is their sum, .diagrams the list); the keywords
         go to gd.diagram (styles, scale, font, omega, ...)"""
         out = []
-        for n, t in enumerate(self.goldstone_terms()):
-            d = gd.diagram(t, **kw)
+        for t in self.goldstone_terms():
+            d = gd.Diagram(t, **kw).layout()
             if d.order != list(range(len(d.verts))):  # the written order is the time order
                 raise ValueError("goldstoninator orders %r differently" % t)
             out.append(d)
@@ -792,7 +795,7 @@ class Diagram(gd.Picture):
                 out[("field", labels[0])] = out.get(("field", labels[0]), Energy()) + w
         # row reduction, the columns ordered so that the free ones are interaction lines and loops
         cols = ["out"] if self.vout is not None else []
-        cols += sorted(along, key=along.get) + [i for i in fermion if i not in along]
+        cols += sorted(along, key=lambda i: along[i]) + [i for i in fermion if i not in along]
         cols += inter[::-1]
         eqs = [r for r in rows.values() if r[0]]
         pivot, done = {}, set()
@@ -1024,6 +1027,14 @@ class Diagram(gd.Picture):
             max(ys) + self.pad,
         ]
         return g
+
+@overload
+def diagram(term: Union[str, Diagram], **kw) -> Diagram: ...
+@overload
+def diagram(term: Sequence[tuple], **kw) -> Diagram: ...
+@overload
+def diagram(term: List[Union[str, gd.Picture]], **kw) -> gd.Grid: ...
+
 
 def diagram(term, **kw):
     """the Feynman diagram of a term (string or list of tuples), or, for a list of terms, a grid of

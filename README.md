@@ -1,175 +1,88 @@
 # Goldstoninator
 
-* Constructs Goldstone diagrams from any (valid) chain of one- and two-body integrals.
-* Uses Goldstone rules to also construct pertrubation term, including sign and energy denominators
-* Can export diagrams as images, or as tikz source code
-* Can also parse the pertrubation term into LaTeX 
-* `feynmanator.py` draws Feynman diagrams (Green's function, Coulomb and polarisation lines) from a product of propagators, with the same exports: see the [last section](#feynman-diagrams-feynmanatorpy)
+Goldstone and Feynman diagrams for many-body perturbation theory, drawn from a line of text, with the perturbation term that goes with them. Python 3 and nothing else; Jupyter for the notebooks.
 
+* **Goldstone diagrams** (`goldstoninator.py`) from any product of one- and two-body integrals, `g_vbrs g_asnb t_rm g_mnva`. The time ordering follows from the letters: core `a b c d e f`, valence `v w x y`, excited otherwise.
+* **The term**: sign, numerator and energy denominators, as LaTeX source or typeset inline. A one-body vertex absorbs an energy ω, which enters the denominators.
+* **Two valence lines**, an effective two-body interaction, with the exchange sign.
+* **Feynman diagrams** (`feynmanator.py`) from a product of propagators, `v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)`: Green's functions (and their excited or core parts), Coulomb lines (and a second, double-wavy kind), polarisation loops (bare or shaded), external fields. The layout is automatic.
+* **Energy labels** on a Feynman diagram, from energy conservation at each vertex.
+* **Feynman → Goldstone**: every time ordering of a Feynman diagram as a Goldstone diagram, with the sum of their terms.
+* **Several diagrams** side by side, with the sum of their terms.
+* **Pictures** inline in Jupyter and as SVG, PDF or TikZ files (a `tikzpicture` to `\input`, or a standalone document). Line styles (wavy, double wavy, dashed, dotted, double, solid), markers (cross, dot, circle, square), picture and label sizes.
 
-## Setup
+## Examples
 
-The module needs Python 3, Jupyter is needed for the notebook.
+For best/full set of examples, see the notebooks:
+ * [goldstone_draw.ipynb](./goldstone_draw.ipynb) for Goldstone examples
+ * [feynman_draw.ipynb](./feynman_draw.ipynb) for Feynman examples
 
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-
-## Quick examples
-
-**1. Write the term and show the diagram.** A term is a product of integrals; `t_rm` is a one-body vertex, drawn here as a cross:
+### Simple Goldstone demonstration
 
 ```python
 import goldstoninator as gd
 
-## Create the diagram:
-example = gd.diagram("g_vbrs g_asnb t_rm g_mnva", styles={"t": "cross"})
-
-## Display it as image in a notebook:
-display(example)
+d = gd.diagram("g_vbrs g_asnb t_rm g_mnva")
+display(d)
 ```
 
-![example](example.svg)
-
-**2. Export the picture**, as a file or straight to TikZ:
+![example](img/example.png)
 
 ```python
-example.save("example.pdf")       # pdf output
-example.save("example.svg")       # or .svg
-example.save("example.tikz")      # tikz source code
-example.save("example.tex")       # a standalone document for pdflatex
-print(example.tikz())             # or just the TikZ source
+# the term as LaTeX, and typeset
+print(d.tex())
+d.equation()
 ```
 
-Wavy lines use the `snake` decoration, so a document that `\input`s the TikZ needs `\usetikzlibrary{decorations.pathmorphing}`. One diagram unit is 1 cm (`unit=` scales it).
-
-**3. The equation**, with sign, numerator and energy denominators, typeset or as source:
-
-```python
-example.equation()                # typeset, as the last line of a cell
-print(example.tex())              # the LaTeX source
-```
-
-$$
+```latex
 +\frac{g_{vbrs}\,g_{asnb}\,t_{rm}\,g_{mnva}}{(\varepsilon_{va}-\varepsilon_{mn})(\varepsilon_{vb}-\varepsilon_{ms})(\varepsilon_{vb}-\varepsilon_{rs}+\omega_t)}
+```
+
+$$
++\frac{g_{vbrs} g_{asnb} t_{rm} g_{mnva}}{(\varepsilon_{va}-\varepsilon_{mn})(\varepsilon_{vb}-\varepsilon_{ms})(\varepsilon_{vb}-\varepsilon_{rs}+\omega_t)}
 $$
 
-The one-body vertex absorbs an energy ω<sub>t</sub>, which enters the denominators after it (see below).
-
-**4. Several terms at once**, side by side, with the sum of their equations:
-
-```python
-g = gd.grid(["t_na g_wavn", "g_wnva t_an"], ncols=2)
-g                                 # the pictures
-g.equation()                      # the sum; g.tex(), g.tikz(), g.save(...) as above
-```
-
-`gd.diagram` with a list of terms does the same as `gd.grid` (and `fd.diagram`, `fd.goldstone` likewise).
-
-## Reference
-
-### Writing a term
-
-Integrals are written as `g_vbms`, `g_{vbms}`, `g[v,b,m,s]`, or as a list of tuples `[('v','b','m','s'), ...]`.
-
-* Two-body `g_pqrs` = ⟨pq|g|rs⟩: electron r → p and s → q, drawn as a vertical interaction line.
-* One-body `h_pr` = ⟨p|h|r⟩: a single vertex (marker), e.g. an external field.
-* Letters: core (holes) `a b c d e f`, valence `v w x y`; every other letter is excited (a particle).
-  Change them with `core=`, `val=`, `exc=`, or `types=dict(x='core')`.
-* Antisymmetrised integrals are not accepted: expand g̃_pqrs = g_pqrs − g_pqsr first.
-* Integrals written in the opposite convention (`g_rspq`) are detected: the reading with the fewest flipped integrals is used.
-
-The diagram follows from the numerator alone. Every non-valence letter appears once as an out index (p, q) and once as an in index (r, s); particles are created before they are annihilated and holes are created before they are filled, which fixes the time order.
-One or two valence lines are allowed: `g_mnvw g_xymn` has `v`, `w` coming in and `x`, `y` going out (an effective two-body interaction).
-Time runs left to right, particle arrows point right and hole arrows left, and the incoming valence line enters at the top left.
-Along the valence line, particle lines are drawn horizontal and hole lines slope down to the left; closed loops are placed freely (a bubble is a lens).
-
-### Energy denominators and sign
-
-One denominator per gap between successive vertices: the initial energy ε_v, plus the energies ω absorbed at the vertices before the gap, plus the energies of the hole lines crossing the gap, minus those of the particle lines (external valence legs count as particles).
-Each denominator is written with the valence energy first and positive, then ±ω. The sign is (−1)^(hole lines + closed loops), times the sign flips needed for that ordering.
-With two valence lines the initial energy is ε_v + ε_w, and the outgoing letters belong to the incoming ones in the order of the valence letters (`v` with `x`, `w` with `y`); a diagram whose open lines connect them the other way round, the exchange diagram, gets an extra minus sign.
-
-A one-body vertex is taken as *absorption* of an energy named after it (`t_rm` absorbs ω_t). The final valence energy never appears: energy conservation ε_w = ε_v + Σω removes it. So the two time orderings of a field vertex give ε_a − ε_n ± ω_t:
-
-```python
-gd.grid(["t_na g_wavn", "g_wnva t_an"]).equation()
-```
-
-`omega=False` gives a static field (no ω), `omega=r'\omega'` a plain symbol, and `omega={'t': r'\omega', 'S': True}` a symbol per name (any vertex may carry one; `True` means ω with the name as subscript).
-
-### Styles
-
-`styles={'S': 'dotted', 't': 'cross'}` on `diagram` or `grid`, or `gd.STYLES['t'] = 'cross'` for the whole session.
-Two-body lines: `wavy` (default for `g`), `doublewavy` (default for `X`; `double-wavy` is read the same), `dashed` (default for other names), `dotted`, `double`, `solid`.
-One-body markers: `x` or `cross` (default), `dot`, `circle`, `square`.
-`pad=` adds margin around the picture, `labels=False` leaves the orbital labels off it; the energy symbols are `gd.EPS` and `gd.OMEGA`.
-
-### Size
-
-`scale=` sets the size of the picture (pixels per diagram unit, 40 by default) and `font=` the size of the labels in points, independently: by default the labels are 0.4 of a unit, so they scale with the picture, while `font=12` keeps them at 12 pt whatever the scale. Both work on `diagram` and `grid`, for Goldstone and Feynman diagrams alike. In TikZ `unit=` (cm per diagram unit) scales the picture and the labels follow the document font unless `font=` is given.
-
-```python
-gd.diagram("g_vamn g_mnva", scale=60, font=12)   # a bigger picture, smaller labels
-```
-
-## Feynman diagrams (`feynmanator.py`)
-
-The same pictures and files for Feynman diagrams, from a product of propagators. There are no rules to derive, only the drawing (`feynman_draw.ipynb` shows the examples below and more):
+### Simple Feynman demonstration
 
 ```python
 import feynmanator as fd
 
-d = fd.diagram("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)")   # second-order direct self-energy
-d                                                          # the picture, inline
-print(d.tikz()); d.save("fig.pdf")                         # .svg, .pdf, .tikz, .tex as above
-fd.grid(["v(1) G(1,2) w(2) Q(1,2)", "v(1) w(1) Q(1,2) G(2,2)"], ncols=2)
+fd.diagram(["v(1) G(1,2) w(2) Q(1,2)", "v(1) w(1) Qs(1,2) G(2,2)", "v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)",
+            "v(1) G(1,2) G(2,3) G(3,4) w(4) Q(1,3) Q(2,4)", "v(1) w(1) Qs(1,2) PI(2,3) Qs(3,4) T(4)",
+            "v(1) G(1,i) t(i) G(i,2) w(2) Q(1,3) PI(3,6) Q(6,2)"], ncols=3)
 ```
 
-![feynman](img/feynman.svg)
-
-A factor is `name(label)` or `name(label,label)`; the labels name the vertices, and any letters or digits will do.
-
-* `G(1,2)`: internal line (Green's function), solid, no arrow. `G(1,1)` is a closed loop (tadpole).
-* `Gex(1,2)`: the excited part of `G`, a line with two arrowheads; `Pa(1,2)`: the core projector, a double line. Both are fermion lines for the layout (the straight line, the loops), like `G`.
-* `Q(1,2)`: Coulomb line, wavy, drawn as a gentle arc; `Qs(1,2)` is a straight one (`curved=False` straightens them all). `Qu(1,2)` and `Qd(1,2)` bend up or down (left or right for a vertical line) when the automatic side is not what you want. Its ends need not touch anything else: `Q(1,2) T(2)` is a line to an external potential.
-* `X(1,2)`: a second Coulomb-type line, double wavy (a screened or effective interaction, say), laid out like `Q`; `Xs`, `Xu` and `Xd` as for `Q`.
-* `PI(1,2)` (also `Pi`, `\Pi`): polarisation loop, `G(1,2) G(2,1)`, drawn as two arcs that never overlap.
-* `PIH(1,2)` (also `PiH`, `\PiH`): the full polarisation operator, the same bubble shaded inside: hatched by default, `styles={'PIH': 'shaded'}` fills it grey, `'crosshatched'` hatches it both ways.
-* `v(1)`, `w(2)` (names `v w x y`): external lines, with arrows. The first one written enters at the top left, the second leaves at the right; at most one of each.
-* Any other name with one label, `T(1)`, is a marker at that vertex (a cross by default); with two labels, `S(1,2)`, a dashed line. `styles={'T': 'dot', 'S': 'dotted', 'G': 'double'}` changes them, as for Goldstone diagrams. Two more line styles exist here: `arrow` and `arrows`, a solid line with one filled or two open arrowheads at its middle, pointing from the first label to the second.
-
-Nothing is drawn at a plain vertex, and there are no labels unless `energies=True` (below).
-The vertices are placed on a small grid, the incoming vertex at the top left, the outgoing one at the right and the fermion line between them straight (`straight=False` frees it); every placement is scored (lines through a vertex, overlapping and crossing lines, length, size, bends, tilted bubbles) and the best one is drawn.
-Lines between the same two vertices are bent into arcs on alternate sides.
-A closed loop of `G` lines is drawn counterclockwise in the direction of propagation (`G(a,b)` runs from b to a), so writing the loop the other way round mirrors it: `G(3,i) t(i) G(i,6) G(6,3)` puts the insertion `i` on the upper line of the loop, `G(3,6) G(6,i) t(i) G(i,3)` on the lower one.
-A loop of three or more `G` lines is drawn as the circle through its vertices (a rounded ring for more than three), so an insertion sits on the curve.
-`fd.diagram(term).layout(cols=, rows=)` sets the grid when the automatic one is not what you want.
-`vertical=('Qi', ...)` forces the lines of those names to run vertically, as in a Goldstone diagram (with `straight=False` when they join two vertices of the fermion line).
-
-### Goldstone diagrams from a Feynman diagram
-
-`fd.goldstone(term)` expands a Feynman diagram into its Goldstone diagrams, one per time ordering of its interactions (the Coulomb lines and the markers), as a goldstoninator grid, so the pictures, the sum of the terms with signs and energy denominators, and the exports all come for free:
+![feynman](img/feynman.png)
 
 ```python
-g = fd.goldstone("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)")   # the two time orderings of the direct term
-g                                                            # the Goldstone pictures
-g.equation()                                                 # their sum, with denominators
-fd.goldstone([direct, exchange], ncols=4).equation()         # several Feynman terms: all their Goldstone diagrams in one grid
-fd.diagram("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)").goldstone_terms()   # ['g_{mnva} g_{avnm}', 'g_{mvba} g_{abvm}']
+# its Goldstone diagrams, one per time ordering
+g = fd.goldstone("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)")
+g
 ```
 
-A Coulomb line `Q(i,j)` becomes the integral g<sub>pqrs</sub> with p, r the fermion lines leaving and entering vertex i and q, s those at vertex j (`X` stays `X`, any other line keeps its name); a marker `T(i)` becomes the one-body T<sub>pr</sub>; both external legs carry the valence letter of the incoming line. For each ordering, a fermion line that runs forward in time is a particle (letters m, n, r, s, …) and one that runs backward, or starts and ends at the same interaction, is a hole (a, b, c, …); `Gex` is only ever a particle and `Pa` only a hole, so orderings that would make them the other are dropped. Every vertex must hold exactly one interaction (a Coulomb-line end or a marker) with one fermion line in and one out, and a shaded loop `PIH` has no expansion. The number of diagrams is the number of orderings: n! for n interactions with plain `G` lines.
-
-### Energies
-
-`energies=True` labels every line with its energy, from energy conservation at each vertex:
+![feynman-goldstone](img/feynman-goldstone.png)
 
 ```python
-fd.grid(["v(1) G(1,2) w(2) Q(1,2)", "v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)"], ncols=2, energies=True)
-fd.diagram("v(1) G(1,i) T(i) G(i,2) w(2) Q(1,2)").energies()   # {'v(1)': '\\varepsilon_{v}', 'G(1,i)': '\\varepsilon_{v}-\\omega', ...}
+# and their sum
+print(g.tex())
+g.equation()
 ```
 
-The incoming leg carries ε<sub>v</sub> (named after the external line), a marker `T(1)` injects an energy ω<sub>T</sub> (ω<sub>T′</sub>, ω<sub>T″</sub> for repeated names), each interaction line that conservation leaves free carries its own ω (ω<sub>1</sub>, ω<sub>2</sub>, … in the order written, plain ω when there is only one) and each closed fermion loop an ε′ (ε″, …); everything else follows, so the fermion line reads ε<sub>v</sub> − ω, the outgoing leg ε<sub>v</sub> + ω<sub>T</sub>, and the two Coulomb lines round a bubble share one ω. Fermion lines carry their energy along the line (round a loop in the direction of propagation); an interaction line, which has no direction, carries its ω away from the vertex earlier on the fermion line and is labelled with a positive leading term. The lines inside a shaded loop `PIH` are not labelled. Labels are LaTeX in the TikZ output and are typeset (Greek letters, subscripts, primes) in the SVG and PDF too; `scale=` and `font=` size the picture and the labels separately (see [Size](#size)).
+```latex
++\frac{g_{mnva}\,g_{avnm}}{(\varepsilon_{va}-\varepsilon_{mn})}
++\frac{g_{mvba}\,g_{abvm}}{(\varepsilon_{vm}-\varepsilon_{ab})}
+```
+
+$$
+\begin{aligned}
+&+\frac{g_{mnva} g_{avnm}}{(\varepsilon_{va}-\varepsilon_{mn})} \\
+&+\frac{g_{mvba} g_{abvm}}{(\varepsilon_{vm}-\varepsilon_{ab})}
+\end{aligned}
+$$
+
+```python
+# with the energy of every line
+fd.diagram("v(1) G(1,2) w(2) Q(1,3) PI(3,4) Q(4,2)", energies=True)
+```
+
+![feynman-energies](img/feynman-energies.png)

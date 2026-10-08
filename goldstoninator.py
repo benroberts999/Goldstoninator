@@ -17,7 +17,11 @@ follows from the numerator alone:
     electron leaves the core state (in slot) and filled later (out slot): these inequalities order
     the vertices in time;
   * the valence letters give the external legs: in slot = incoming, out slot = outgoing; one or two
-    valence lines (two incoming and two outgoing letters: an effective two-body interaction).
+    valence lines (two incoming and two outgoing letters: an effective two-body interaction).  With
+    two, the initial energy is eps_v + eps_w and the outgoing letters belong to the incoming ones in
+    the order of the valence letters (v with x, w with y); the exchange diagram, whose open lines
+    connect them the other way round, gets an extra minus sign.
+Antisymmetrised integrals are not accepted: expand g~_pqrs = g_pqrs - g_pqsr first.
 
 Time runs left to right, the incoming valence line enters at the top left; along the valence line
 particle lines are horizontal and hole lines slope down to the left (closed loops are placed freely,
@@ -57,6 +61,7 @@ Letter classes (override with core='abcd', val='v', exc='...' or types=dict(a='c
 Line styles for two-body names: wavy (default for g), doublewavy (default for X), dashed (default
 otherwise), dotted, double, solid; 'double-wavy' and 'double wavy' are read as doublewavy.
 Markers for one-body names: x (default; 'cross' is the same), dot, circle, square.
+styles={...} on diagram() or grid() sets them for one picture, gd.STYLES['t'] = 'dot' for the session.
 Energy symbols in tex(): EPS (orbital energies) and OMEGA (absorbed energies, subscripted by the name).
 
 feynmanator.py draws Feynman diagrams (G, Q and polarisation lines, external legs) with the drawing
@@ -67,6 +72,7 @@ import itertools
 import math
 import random
 import re
+from typing import List, Sequence, Tuple, Union, overload
 
 CORE = "abcdef"
 EXC = "mnrspqtu"
@@ -1208,6 +1214,14 @@ def several(term):
     )
 
 
+@overload
+def diagram(term: Union[str, Diagram], **kw) -> Diagram: ...
+@overload
+def diagram(term: Sequence[tuple], **kw) -> Diagram: ...
+@overload
+def diagram(term: List[Union[str, Picture]], **kw) -> Grid: ...
+
+
 def diagram(term, **kw):
     """the diagram of one term (string or list of integrals), or, for a list of terms, a Grid of
     them as grid() gives (ncols=, gap=); keywords: styles, pad, omega, labels, scale, font,
@@ -1232,15 +1246,21 @@ def grid(terms, ncols=3, scale=None, gap=6.0, **kw):
 # ----------------------------------------------------------------------------------------------
 def _save(obj, path, scale, unit):
     if path.endswith(".svg"):
-        open(path, "w", encoding="utf-8").write(obj.svg() if scale is None else obj.svg(scale))
+        data = obj.svg() if scale is None else obj.svg(scale)
     elif path.endswith(".pdf"):
-        open(path, "wb").write(obj.pdf() if scale is None else obj.pdf(scale))
+        data = obj.pdf() if scale is None else obj.pdf(scale)
     elif path.endswith(".tikz"):
-        open(path, "w", encoding="utf-8").write(obj.tikz(unit) + "\n")
+        data = obj.tikz(unit) + "\n"
     elif path.endswith(".tex"):
-        open(path, "w", encoding="utf-8").write(obj.tikz(unit, standalone=True))
+        data = obj.tikz(unit, standalone=True)
     else:
         raise ValueError("use a .svg, .pdf, .tikz or .tex file name")
+    if isinstance(data, bytes):
+        with open(path, "wb") as f:
+            f.write(data)
+    else:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(data)
     return path
 
 
@@ -1268,13 +1288,14 @@ def _tikz_standalone(body):
 
 def _svg_wrap(body, W, H):
     return (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">\n%s\n</svg>'
-        % (W, H, W, H, body)
+        '<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">\n'
+        '<rect width="100%%" height="100%%" fill="white"/>\n%s\n</svg>' % (W, H, W, H, body)
     )
 
 
 def _pdf_wrap(body, W, H):
-    """a one-page PDF (bytes) with the given content stream"""
+    """a one-page PDF (bytes) with the given content stream, on a white page"""
+    body = "1 g 0 0 %.2f %.2f re f 0 g\n%s" % (W, H, body)
     objs = [
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -1464,6 +1485,8 @@ def _label_tokens(text):
         ch = text[i]
         if ch == "\\":
             m = re.match(r"\\([A-Za-z]+|.)", text[i:])
+            if m is None:  # a backslash at the very end
+                break
             name = m.group(1)
             i += m.end()
             if name in _GREEK:
@@ -1647,7 +1670,13 @@ def _carc(c, r, t0, t1, npts=None):
     return pts, tans
 
 
-def _wavy(pts, tans, amp=0.07, wavelength=0.25, shift=0.0):
+def _wavy(
+    pts: Sequence[Tuple[float, float]],
+    tans: Sequence[Tuple[float, float]],
+    amp=0.07,
+    wavelength=0.25,
+    shift=0.0,
+):
     """a wavy line along a curve: sinusoid in the arc length, displaced along the normal (by shift
     on top, for the two strokes of a double wavy line)"""
     k = 2 * math.pi / wavelength
