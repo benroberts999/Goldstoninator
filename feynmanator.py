@@ -671,11 +671,12 @@ class Diagram(gd.Picture):
         """the Goldstone terms of the diagram, one per time ordering of its interactions (the Coulomb
         lines and the markers), as goldstoninator reads them.  A Coulomb line Q(i,j) is the integral
         g_{pqrs} with p, r the fermion lines leaving and entering vertex i and q, s those at j (X stays
-        X, any other line keeps its name); a marker T(i) is the one-body T_{pr}; both external legs
-        carry the valence letter of the incoming line.  A fermion line that runs forward in time is a particle
-        (letters m n r s ...), one that runs backward, or starts and ends at the same interaction, a
-        hole (a b c ...); Gex is a particle only and Pa a hole only, so orderings that would make them
-        the other are left out.  The integrals are written earliest first.  Needs every vertex to hold
+        X, any other line keeps its name); a marker T(i) is the one-body T_{pr}; each external leg
+        keeps its own name as its valence letter (v(1) ... w(2): v in, w out).  A fermion line that
+        runs forward in time is a particle (letters m n r s ...), one that runs backward, or starts and
+        ends at the same interaction, a hole (a b c ...); Gex is a particle only and Pa a hole only, so
+        orderings that would make them the other are left out.  The integrals are written earliest
+        first.  Needs every vertex to hold
         one interaction (a Coulomb-line end or a marker) with one fermion line in and one out; a shaded
         loop PIH has no expansion"""
         E = self.edges
@@ -704,11 +705,10 @@ class Diagram(gd.Picture):
                 raise ValueError("two fermion lines %s vertex %s: %s" % (
                     "leave" if src in outs else "enter", src if src in outs else dst, self._term_str()))
             outs[src], ins[dst] = ("line", i), ("line", i)
-        val = self.ext[0][0] if self.ext else None  # the valence letter, for both legs
-        if self.vin is not None:
-            ins[self.vin] = ("leg", val)
+        if self.vin is not None:  # each leg carries its own name as its valence letter
+            ins[self.vin] = ("leg", self.ext[0][0])
         if self.vout is not None:
-            outs[self.vout] = ("leg", val)
+            outs[self.vout] = ("leg", self.ext[1][0])
         for x in self.vertices:
             if x not in at:
                 raise ValueError("vertex %s holds no Coulomb line or marker: %s" % (x, self._term_str()))
