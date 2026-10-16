@@ -287,7 +287,11 @@ def _params(ts, external, fields):
     params += [("const Coulomb::QkTable &", "qk")]
     ops = dict.fromkeys(n for t in ts for n, g in t.factors if len(g) == 2)
     params += [("const DiracOperator::TensorOperator &", "op_" + n) for n in ops]
-    syms = dict.fromkeys(s for t in ts for _, _, om in t.dens for s in om)
+    # the energies in the order of the operators that absorb them (then any others)
+    in_dens = {s for t in ts for _, _, om in t.dens for s in om}
+    by_op = [sy for n in ops for t in ts for (m, g), sy in zip(t.factors, t.omegas) if m == n and sy]
+    syms = dict.fromkeys([sy for sy in by_op if sy in in_dens] +
+                         [s for t in ts for _, _, om in t.dens for s in om])
     omegas = {}
     for sy in syms:
         omegas.setdefault(_omega_var(sy), set()).add(sy)
