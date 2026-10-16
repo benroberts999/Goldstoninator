@@ -12,8 +12,9 @@ independent test).
   (1/[j_v]) sum_m <w m|X|v m> (times delta_{kappa_v kappa_w}); the output states this explicitly.
 - One external field of rank k: the reduced matrix element <w||X^k||v>, Wigner-Eckart as in WigEck
   ((-1)^{j_w-m_w} 3j), which is also ampsci's `rme3js`.
-- Several external fields: **uncoupled** by default, i.e. the external m-dependence is left as explicit
-  3j's (see "External legs").  Coupled basis {T^{k1} x S^{k2}}^K optional.
+- Several external fields: **uncoupled** by default ('m'): the chain basis along the valence line,
+  result X_{j_1...} (see "External legs").  Coupled basis {T^{k1} x S^{k2}}^K optional ('coupled',
+  two fields).
 - Two valence lines: S^k_{xyvw} with sum_k A^k_{xyvw} S^k_{xyvw} (as CI Sigma^2).
 - One-body reduced matrix elements in **literal** order <p||t||r>, never swapped.
 - Direct/exchange pairs become W; when either vertex could carry it, prefer **QW** over WQ (W on the
@@ -51,31 +52,37 @@ module maps g~ straight to W (no pairing search needed for that vertex).
 
 ## Module `angularinator.py` (stdlib only)
 
-1. **wigner**: numeric 3j/6j/9j (Racah formula) and C^k_ab, for the internal tests only.
+1. **wigner**: numeric 3j/6j (Racah formula) and 9j (sum of 6j's), for the internal tests only.
 2. **phase**: linear-form exponents, canonical mod-2 form, pretty printing (e.g. (-1)^{j_a-j_b+k}).
 3. **network**: nodes/lines from a goldstoninator Diagram (`verts`, `lines`, `vins`, `vouts`).
-   One-body names get a rank: `ranks={'t': 'k', 'T': 'k_1', 'S': 'k_2', 'V': 0}`; four-index names
-   (g, X, ...) an A^k with a fresh multipole.
+   One-body names get a rank: `ranks={'t': 'k', 'T': r'\kappa', 'V': 0}` (0 = scalar; a name is
+   validated against letters, the generated C++ and the other ranks); four-index names (g, X, ...)
+   an A^k with a fresh multipolarity.  Internal symbols contain '#' (k#1, K#T, x#1, j#1, K#out,
+   K#cpl), so no user name can collide; RTerm picks the display names (checked in raw, TeX and C++
+   forms) and renames through temporary names.
 4. **external legs**: a basis for the open legs; the coefficient is the closed graph
    (diagram x conjugate basis) / norm, so everything reduces to closed graphs.
    - `average` (no field): close v with w, divide by [j_v].
    - `reduced` (one field): attach (-1)^{j_w-m_w} (j_w k j_v; -m_w q m_v).
    - two valence lines: project on A^k_{xyvw} (normalisation derived and tested).
-   - `uncoupled` (several fields, default): an invariant with 4+ open legs is not a single product of
-     3j's, so one intermediate per extra field is unavoidable.  Proposed: chain along the valence line in
-     written order, sum_x (-1)^{j_w-m_w}(j_w k_1 j_x; -m_w q_1 m_x)(-1)^{j_x-m_x}(j_x k_2 j_v; -m_x q_2 m_v) X_x
-     (x half-integer), like <w||T||x><x||S||v>.  (Agreed.)
-   - `coupled` (optional): {T^{k1} x S^{k2}}^K_Q, sum over K.
+   - `m` (several fields, default; implemented): chain along the valence line in written order,
+     sum_x (-1)^{j_w-m_w}(j_w k_1 j_x; -m_w q_1 m_x)(-1)^{j_x-m_x}(j_x k_2 j_v; -m_x q_2 m_v) X_x
+     (x half-integer), like <w||T||x><x||S||v>; closure (j_{i-1}+, K_i-, j_i-), (-1)^n prod [j_i].
+   - `coupled` (two fields; implemented): {T^{k1} x S^{k2}}^K_Q, result X_K for K given.
 5. **yutsis**: symbolic reduction of closed graphs.  Canonicalise nodes with the two elementary moves
-   (reverse an arrow: (-1)^{2j}; reverse a node: (-1)^{j1+j2+j3}); rules on canonical templates only:
-   zero line, self-loop (tadpole: delta_{k0}), disconnected -> product, 2-line cut -> delta/[j],
-   3-line cut -> factorisation, triangle -> 6j, square -> sum_x [x] 6j 6j, longer cycles -> interchange
-   (one 6j and sum_x) to shorten; shortest cycle first; recognise 9j at the end.  Forms are not unique
-   (Biedenharn-Elliott): compare numerically, never as strings.
-6. **exchange**: pair direct/exchange terms -> W (QW preferred), canonical relabelling of dummy letters
-   (brute force within each class), merge identical terms.
-7. **output**: Q (8-fold) and W/P (4-fold) symmetries and 6j tetrahedral symmetry to tidy indices;
-   `.tex()` with the Methods macros (\sixj, \threej, \redmatel, [k]); `.ampsci()`; `.ampsci_fullmsum()`.
+   (reverse an arrow: (-1)^{2j}; reverse a node: (-1)^{j1+j2+j3}); rules on canonical templates only
+   (implemented): self-loop (tadpole: delta_{k0}), zero line (junction), theta, bubble (delta/[j]),
+   triangle -> 6j, cycles of length >= 4 -> interchange (one 6j and sum_x) to shorten; shortest
+   cycle first; theta and bubble record their triangle conditions; then 9j recognition and 6j
+   orientation.  Not implemented (not needed so far): separation on 2- and 3-line cuts.  Forms are
+   not unique (Biedenharn-Elliott): compare numerically, never as strings.
+6. **exchange**: pair direct/exchange terms -> W (QW preferred, iterated, so WW too); the key renames
+   internal letters to placeholders by kind, includes the denominators, and allows either
+   orientation of an existing W (with its sign).  Identical terms are not merged.
+7. **output**: 6j in the most readable of its 24 forms; `.tex()` (macros=True: \sixj, \redmatel),
+   `.equation()`, `.ampsci()`, `.ampsci_fullmsum()`; constraints delta_{ab} between fixed symbols
+   (letters' j, ranks, k, chain j's) printed and checked in C++.  Q/W indices stay in the diagram
+   orientation (the 8-/4-fold symmetries are not used to tidy them).
 
 Internal tests (Python, development only, not user-facing): every yutsis rule and every reduced graph is
 checked numerically against the direct m-contraction of its 3j network for random j's (half-integer
@@ -86,10 +93,12 @@ physics-level test is ampsci.
 
 Both functions get the same signature and return the same quantity, so they compare one to one:
 
-    double <name>(const DiracSpinor &v, const DiracSpinor &w,
+    double <name>(const DiracSpinor &Fv, const DiracSpinor &Fw,      // valence: in, then out
                   const std::vector<DiracSpinor> &core, const std::vector<DiracSpinor> &excited,
-                  const Coulomb::QkTable &qk, const DiracOperator::TensorOperator &t, double omega_t,
-                  [int two_mw, int two_mv, int two_q1, ... for the uncoupled multi-field case])
+                  const Coulomb::QkTable &qk,                         // unused by the full-m form
+                  const DiracOperator::TensorOperator &op_t, ...,     // one per one-body name
+                  double omega_t, ...,                                // energies in the denominators
+                  [int k (Ak) | int K (coupled) | int tmi_v, int tmo_w, int tq_t, ... (m)])
 
 - `.ampsci()`: the reduced form.  Loops over core/excited per dummy letter; multipoles from
   `Coulomb::k_minmax_Q` / `k_minmax_W`; `qk.Q(k,a,b,c,d)` and `qk.W(k,a,b,c,d)`; `Angular::sixj_2`
@@ -100,8 +109,7 @@ Both functions get the same signature and return the same quantity, so they comp
   A^k/Q/W), with g~ expanded back into g_abcd - g_abdc, and `t.fullME(Fa, Fb, two_ma, two_mb, two_q)`;
   then the same external treatment (average / projection with `rme3js` / A^k projection / fixed m's).
   Slow (g_abcd recomputes radial integrals): tiny basis only.
-- Optional: an ampsci Module (after `Modules/exampleModule.cpp`) that runs both on a small basis for a
-  list of valence states and prints the relative differences.
+- Testing is done by `ampsci_tests/run.sh` (a standalone program, not an ampsci Module).
 
 Not covered by this comparison: the signs and denominators, which both versions take from
 goldstoninator (check those against known results, e.g. ampsci's Sigma2 and StructureRad).
@@ -113,8 +121,9 @@ goldstoninator (check those against known results, e.g. ampsci's Sigma2 and Stru
 | M0 | g~ input in goldstoninator | expansion, relative signs, grid sums | done |
 | M1 | external legs, `.ampsci_fullmsum()` (angularinator.py; methods on gd.Diagram, gd.Grid, fd.Diagram) | `ampsci_tests/run.sh`, below | done |
 | M2 | wigner, phase, network builder, yutsis engine | internal numeric tests (rules, random graphs, networks) | done |
-| M3 | exchange -> W, tidying, `.tex()`, `.ampsci()` | Sigma^(2) (4 diagrams -> eq. dE-SO-red), first-order RPA, CI Sigma^2_{vwxy}; `.ampsci()` vs `.ampsci_fullmsum()` in `ampsci_tests` | done (structure radiation still to do) |
-| M4 | Feynman level (one angular factor per Feynman diagram), several fields (v T S w Q), coupled basis | as M3; bonus: against ampsci Sigma2 / StructureRad | |
+| M3 | exchange -> W, tidying, `.tex()`, `.ampsci()` | Sigma^(2) (4 diagrams -> eq. dE-SO-red), first-order RPA, CI Sigma^2_{vwxy}; `.ampsci()` vs `.ampsci_fullmsum()` in `ampsci_tests` | done |
+| M4 | several fields (v T S w Q), coupled basis, 9j, structure radiation, demo notebook | as M3; against ampsci StructureRad | done |
+| M5 | condensed output: one angular factor per Feynman diagram / group of terms | | waiting for the user's choice of format |
 
 Where a main.tex formula disagrees with the ampsci full m-sum, report it rather than adjust the code.
 
@@ -137,7 +146,8 @@ and `main.cpp`.  M3 adds the `.ampsci()` versions next to the full-m ones.
 
 Implementation notes: a one-body integral that goldstoninator would have to flip (t_{in,out}) is an
 error; an omega that appears in no denominator is not an argument; unused arguments are commented out
-(the signature stays the same as the reduced form's).
+(the signature stays the same as the reduced form's); omega symbols map injectively to C++ names
+(\omega' -> omegap); two valence lines with the same letter are rejected.
 
 ### M2/M3 results
 
@@ -151,7 +161,7 @@ error; an omega that appears in no denominator is not an argument; unused argume
 - Reduced forms reproduce the notes: dE-SO-red; RPA (the second term as (-1)^{k+w-a}/[k], equal
   to the notes' (-1)^{k+w-n}(-1)^{a-n}); CI ladder [k]{mu lambda k; x v a}{mu lambda k; y w b} with
   the notes' phase; CI g~g~ (-1)^k/[k].
-- `ampsci_tests/run.sh`: `.ampsci()` = `.ampsci_fullmsum()` for 15 cases (Sigma2 three ways, RPA,
+- `ampsci_tests/run.sh` (at M3): `.ampsci()` = `.ampsci_fullmsum()` for 15 cases (Sigma2 three ways, RPA,
   lone g, CI ladders and exchange terms, third order, g~ third order, Hartree/exchange tadpoles,
   tadpole with field, scalar operator, two Feynman diagrams, third order with field): ~1e-15
   (1e-8 only on values that cancel to 1e-11).  Test energies spread to avoid H-like degeneracies;
@@ -164,8 +174,9 @@ error; an omega that appears in no denominator is not an argument; unused argume
 - 'coupled' (two fields): X_K, closure (k1-, k2-, K+)(w+, K-, v-), -sqrt[K](-1)^{k1-k2+K}; also in
   the full-m form.
 - 9j recognition (sum_x [x] 6j6j6j with x-independent phase); notes-style 6j orientation.
-- Structure radiation: the 36 SR diagrams (six Feynman diagrams) reduce to 18 QW terms; reduced =
-  full-m (1e-14) and = ampsci StructureRad::SR (1e-13, omega = e_w - e_v).
+- Structure radiation: the 36 SR diagrams (six Feynman diagrams) reduce to 12 terms (6 QW, 6 WW;
+  18 QW before the second review's pairing fixes); reduced = full-m (1e-14) and = ampsci
+  StructureRad::SR (1e-13, omega = e_w - e_v).
 - Demo notebook angular_reduction.ipynb (tracked, the user asked for it).
 
 ### First review (28 agents): 22 confirmed findings, 10 distinct issues, all fixed with regressions
@@ -181,6 +192,12 @@ collisions (\mu vs mu, k_T vs kT, equal rank names) now checked in raw/TeX/C++ f
 allowed again; chain_tex names; exchange partners with other letter names now pair (placeholder
 relabelling); W orientation in the pairing key (order independence).  The SR diagrams now merge to
 12 terms (6 QW, 6 WW), still = StructureRad::SR.  ampsci_tests: 34 comparisons pass.
+
+Current tests: `ampsci_tests/run.sh` (34 reduced-vs-full-m comparisons, plus the M1 checks against
+ampsci's Sigma_vw, Q^k, reducedME/fullME, the RPA formula, and SR against StructureRad::SR);
+`test_reduce.py` (random graphs, incl. lines sharing symbols), `test_network.py` (term networks vs
+direct m-sums, incl. diagonal reduced terms and delta_{k0} cases), `test_modes.py` (m and coupled
+closures vs direct m-sums).
 
 ## Next
 
