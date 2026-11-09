@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-feynmanator.py -- Feynman diagrams from a product of propagators, drawn with the code of
-goldstoninator.py (same SVG, PDF and TikZ output, same grid of several diagrams).
+goldstoninator.feynmanator -- Feynman diagrams from a product of propagators, drawn with the code of
+goldstoninator (same SVG, PDF and TikZ output, same grid of several diagrams).
 
-    import feynmanator as fd
+    from goldstoninator import feynmanator as fd
     d = fd.diagram("v(1) G(1,2) w(2) Q(1,2)")   # exchange (Fock) self-energy
     d                                             # the picture, as the last line of a Jupyter cell
     print(d.tikz())                               # TikZ source;  d.save('fig.svg' / '.pdf' / '.tikz' / '.tex')
@@ -61,7 +61,7 @@ backward.
 Size: scale= is the size of the picture (pixels per diagram unit, 40 by default) and font= the size of the
 labels in points (by default 0.4 of a unit, so they scale with the picture; font=12 keeps them at 12 pt
 whatever the scale).  In TikZ, unit= scales the picture and font= the labels (else the document font).
-No dependencies beyond the standard library (and goldstoninator.py).
+No dependencies beyond the standard library (and the rest of goldstoninator).
 """
 
 import itertools
@@ -70,7 +70,7 @@ import re
 from fractions import Fraction
 from typing import List, Sequence, Union, overload
 
-import goldstoninator as gd
+from . import goldstone as gd
 
 EXT = "vwxy"  # names of the external lines
 GREEN = "G"  # the internal (fermion) line
@@ -751,13 +751,13 @@ class Diagram(gd.Picture):
 
     def angular(self, **kw):
         """the angular reduction (Q^k, W^k, 6j symbols; .tex(), .equation(), .ampsci()), see angularinator"""
-        import angularinator
+        from . import angularinator
 
         return angularinator.angular(self, **kw)
 
     def ampsci(self, name="term_reduced", **kw):
         """C++ for ampsci evaluating the angular-reduced form (see angularinator)"""
-        import angularinator
+        from . import angularinator
 
         inc = kw.pop("includes", True)
         return angularinator.angular(self, **kw).ampsci(name, includes=inc)
@@ -765,7 +765,7 @@ class Diagram(gd.Picture):
     def ampsci_fullmsum(self, name="term_fullmsum", **kw):
         """C++ for ampsci evaluating the sum of the Goldstone diagrams by brute force over every m
         (see angularinator)"""
-        import angularinator
+        from . import angularinator
 
         return angularinator.ampsci_fullmsum(self, name=name, **kw)
 

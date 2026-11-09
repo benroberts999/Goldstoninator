@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-goldstoninator.py -- Goldstone (time-ordered) diagrams and energy denominators from the numerator of
+goldstoninator -- Goldstone (time-ordered) diagrams and energy denominators from the numerator of
 an MBPT term.
 
 A term is a product of integrals.  A two-body integral g_{pqrs} = <pq|g|rs> (electron r -> p and
@@ -42,7 +42,7 @@ vertex absorbs an energy, eps_w is kept.  Each denominator is written with the v
 positive (flipping the overall sign if needed), followed by the +/- omega terms; the sign is
 (-1)^(hole lines + closed loops), times the flips.
 
-Usage (see goldstoninator.ipynb):
+Usage (see goldstone_draw.ipynb):
     import goldstoninator as gd
     d = gd.diagram('g_vbms g_asnb g_mnva')     # also 'g_{vbms} ...', 'g[v,b,m,s] ...', [('v','b','m','s'), ...]
     d                                           # shown inline in Jupyter
@@ -68,8 +68,8 @@ Markers for one-body names: x (default; 'cross' is the same), dot, circle, squar
 styles={...} on diagram() or grid() sets them for one picture, gd.STYLES['t'] = 'dot' for the session.
 Energy symbols in tex(): EPS (orbital energies) and OMEGA (absorbed energies, subscripted by the name).
 
-feynmanator.py draws Feynman diagrams (G, Q and polarisation lines, external legs) with the drawing
-code of this file (class Picture).
+goldstoninator.feynmanator draws Feynman diagrams (G, Q and polarisation lines, external legs) with the
+drawing code of this file (class Picture); goldstoninator.angularinator does the angular reduction.
 """
 
 import itertools
@@ -77,6 +77,11 @@ import math
 import random
 import re
 from typing import List, Sequence, Tuple, Union, overload
+
+# the names `import goldstoninator as gd` gives
+__all__ = ["CORE", "EXC", "VAL", "STYLES", "DEFAULT_STYLE", "DEFAULT_MARKER", "DOUBLE", "EPS", "OMEGA",
+           "TIKZ_PREAMBLE", "parse_tilde", "parse_term", "has_tilde", "expand", "Picture", "Diagram", "Grid",
+           "Equation", "several", "diagram", "grid", "label_width", "canon_styles"]
 
 CORE = "abcdef"
 EXC = "mnrspqtu"
@@ -930,20 +935,20 @@ class Diagram(Picture):
 
     def angular(self, **kw):
         """the angular reduction (Q^k, W^k, 6j symbols; .tex(), .equation(), .ampsci()), see angularinator"""
-        import angularinator
+        from . import angularinator
 
         return angularinator.angular(self, **kw)
 
     def ampsci(self, name="term_reduced", **kw):
         """C++ for ampsci evaluating the angular-reduced form (see angularinator)"""
-        import angularinator
+        from . import angularinator
 
         inc = kw.pop("includes", True)
         return angularinator.angular(self, **kw).ampsci(name, includes=inc)
 
     def ampsci_fullmsum(self, name="term_fullmsum", **kw):
         """C++ for ampsci evaluating the term by brute force over every m (see angularinator)"""
-        import angularinator
+        from . import angularinator
 
         return angularinator.ampsci_fullmsum(self, name=name, **kw)
 
@@ -1309,20 +1314,20 @@ class Grid:
 
     def angular(self, **kw):
         """the angular reduction (Q^k, W^k, 6j symbols; .tex(), .equation(), .ampsci()), see angularinator"""
-        import angularinator
+        from . import angularinator
 
         return angularinator.angular(self, **kw)
 
     def ampsci(self, name="term_reduced", **kw):
         """C++ for ampsci evaluating the angular-reduced form (see angularinator)"""
-        import angularinator
+        from . import angularinator
 
         inc = kw.pop("includes", True)
         return angularinator.angular(self, **kw).ampsci(name, includes=inc)
 
     def ampsci_fullmsum(self, name="term_fullmsum", **kw):
         """C++ for ampsci evaluating the sum of the terms by brute force over every m (see angularinator)"""
-        import angularinator
+        from . import angularinator
 
         return angularinator.ampsci_fullmsum(self, name=name, **kw)
 

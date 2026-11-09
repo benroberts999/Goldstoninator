@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-angularinator.py -- angular reduction of Goldstone diagrams (goldstoninator.py), with C++ output for
+goldstoninator.angularinator -- angular reduction of Goldstone diagrams, with C++ output for
 ampsci, and in its conventions: Q^k, W^k = Q^k + P^k, and reduced matrix elements
 <a m_a|t^k_q|b m_b> = (-1)^{j_a-m_a} (j_a k j_b; -m_a q m_b) <a||t^k||b>.
 
@@ -17,7 +17,7 @@ j, ranks, k); the identifications of multipolarities collapse their sums silentl
 as a brute-force sum over every m, using only Coulomb::g_abcd and TensorOperator::fullME: the
 independent check of the reduced form.
 
-    import angularinator as ang
+    from goldstoninator import angularinator as ang
     r = ang.angular([r"g_vamn \\tilde g_nmav", r"g_vnab \\tilde g_banv"])
     r.tex(); r.equation()                          # LaTeX; typeset in Jupyter (macros=True: \\sixj)
     print(r.ampsci("de2"))                         # ampsci C++ of the reduced form
@@ -47,7 +47,7 @@ letters run over), the QkTable (for the reduced form; the full-m one ignores it)
 TensorOperator per one-body name, one double per energy omega in the denominators, then k or the m's.
 Two-body integrals must be g; one-body ones written t_{out,in}.  The signs and denominators are
 goldstoninator's (keywords go to it: types, core, exc, val, omega).
-No dependencies beyond the standard library (and goldstoninator.py).
+No dependencies beyond the standard library (and the rest of goldstoninator).
 """
 
 import itertools
@@ -57,7 +57,7 @@ import textwrap
 from fractions import Fraction
 from functools import lru_cache
 
-import goldstoninator as gd
+from . import goldstone as gd
 
 EXTERNALS = ("average", "reduced", "Ak", "m", "coupled")
 INCLUDES = """#include "Angular/Wigner369j.hpp"
@@ -148,7 +148,7 @@ def terms(term, **kw):
 
 
 def _diagrams(term, **kw):
-    import feynmanator as fd
+    from . import feynmanator as fd
 
     if isinstance(term, gd.Grid):
         return list(term.diagrams)
