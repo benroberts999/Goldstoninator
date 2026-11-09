@@ -749,6 +749,26 @@ class Diagram(gd.Picture):
                 raise ValueError("too many fermion lines for the letters %s / %s" % (gd.CORE, gd.EXC))
         return terms
 
+    def angular(self, **kw):
+        """the angular reduction (Q^k, W^k, 6j symbols; .tex(), .equation(), .ampsci()), see angularinator"""
+        import angularinator
+
+        return angularinator.angular(self, **kw)
+
+    def ampsci(self, name="term_reduced", **kw):
+        """C++ for ampsci evaluating the angular-reduced form (see angularinator)"""
+        import angularinator
+
+        inc = kw.pop("includes", True)
+        return angularinator.angular(self, **kw).ampsci(name, includes=inc)
+
+    def ampsci_fullmsum(self, name="term_fullmsum", **kw):
+        """C++ for ampsci evaluating the sum of the Goldstone diagrams by brute force over every m
+        (see angularinator)"""
+        import angularinator
+
+        return angularinator.ampsci_fullmsum(self, name=name, **kw)
+
     def goldstone(self, ncols=3, **kw):
         """the Goldstone diagrams of the diagram, one per time ordering of its interactions, as a
         goldstoninator Grid (shown inline; .equation() is their sum, .diagrams the list); the keywords

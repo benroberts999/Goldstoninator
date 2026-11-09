@@ -21,7 +21,9 @@ follows from the numerator alone:
     two, the initial energy is eps_v + eps_w and the outgoing letters belong to the incoming ones in
     the order of the valence letters (v with x, w with y); the exchange diagram, whose open lines
     connect them the other way round, gets an extra minus sign.
-Antisymmetrised integrals are not accepted: expand g~_pqrs = g_pqrs - g_pqsr first.
+An antisymmetrised integral, \\tilde g_{pqrs} (or \\widetilde{g}_{pqrs}, g~_pqrs), stands for g_pqrs - g_pqsr:
+gd.diagram() draws its two diagrams, each with its own sign (the exchange one always has the opposite sign,
+so their sum is the term with g~); n of them give 2^n diagrams.
 
 Time runs left to right, the incoming valence line enters at the top left; along the valence line
 particle lines are horizontal and hole lines slope down to the left (closed loops are placed freely,
@@ -55,6 +57,7 @@ Usage (see goldstoninator.ipynb):
     gd.diagram('h_na S_wavn', omega={'h': r'\\omega', 'S': True})   # symbol per name; True: omega_{name}
     gd.diagram('g_vamn g_mnva', labels=False)   # the picture without the orbital labels
     gd.diagram('g_vamn g_mnva', scale=60, font=12)   # a bigger picture (pixels per unit) with 12 pt labels
+    gd.diagram(r't_na \\tilde g_wavn')         # g~_wavn = g_wavn - g_wanv: a Grid of the two diagrams
 No dependencies beyond the standard library.
 
 Letter classes (override with core='abcd', val='v', exc='...' or types=dict(a='core', ...)):
@@ -95,57 +98,103 @@ TIKZ_PREAMBLE = "\\documentclass[tikz,border=2pt]{standalone}\n\\usetikzlibrary{
 # parsing
 # ----------------------------------------------------------------------------------------------
 _G_RE = re.compile(
-    r"(\\widetilde\s*|\\tilde\s*)?(?<![A-Za-z\\])([A-Za-z]+)\s*(?:_\{\s*([A-Za-z]{4}|[A-Za-z]{2})\s*\}"
+    r"(?:(\\widetilde|\\tilde)\s*(\{)?\s*|(?<![A-Za-z\\]))([A-Za-z]+)\s*(?(2)(\})?\s*)(~)?\s*"
+    r"(?:_\{\s*([A-Za-z]{4}|[A-Za-z]{2})\s*\}"
     r"|_([A-Za-z]{4}|[A-Za-z]{2})(?![A-Za-z])"
     r"|[\[(]\s*([A-Za-z])\s*,\s*([A-Za-z])(?:\s*,\s*([A-Za-z])\s*,\s*([A-Za-z]))?\s*[\])])"
+    r"(?(2)(?(4)|\s*\}))"  # \tilde{g_{abcd}}: the brace closes after the labels
 )
+_TILDE_RE = re.compile(r"^\s*(?:\\widetilde|\\tilde)\s*\{?\s*([A-Za-z]+)\s*\}?\s*$|^\s*([A-Za-z]+)\s*~\s*$")
 
 
 def _factors(text):
-    """[(name, labels), ...] for every integral in a string; labels has 4 (two-body) or 2 entries"""
-    out = []
+    """[(name, labels, tilde), ...] for every integral in a string; labels has 4 (two-body) or 2
+    entries; tilde marks an antisymmetrised integral (\\tilde g_{abcd}, \\widetilde{g}_{abcd}, g~_abcd)"""
+    out, rest = [], text
     for m in _G_RE.finditer(text):
-        if m.group(1):
-            raise ValueError(
-                "antisymmetrised integral in %r: expand g~_pqrs = g_pqrs - g_pqsr first"
-                % text
-            )
-        if m.group(3) or m.group(4):
-            lab = tuple(m.group(3) or m.group(4))
+        if m.group(6) or m.group(7):
+            lab = tuple(m.group(6) or m.group(7))
         else:
-            lab = tuple(x for x in m.group(5, 6, 7, 8) if x)
-        out.append((m.group(2), lab))
+            lab = tuple(x for x in m.group(8, 9, 10, 11) if x)
+        out.append((m.group(3), lab, bool(m.group(1) or m.group(5))))
+        rest = rest.replace(m.group(0), " ", 1)
+    if re.search(r"\\(widetilde|tilde)(?![A-Za-z])", rest):
+        raise ValueError("cannot read the antisymmetrised integral in %r (write \\tilde g_{abcd} or g~_abcd)" % text)
     return out
 
 
-def parse_term(term):
-    """term -> (names, [labels, ...]).  A string ('g_{vbms} S_{asnb} h_{na}', 'g_vbms ...',
-    'g[v,b,m,s] ...') or a list of items: 'g_abcd' strings, 4- or 2-letter strings, or tuples
-    (p,q,r,s) / (name,p,q,r,s) / (name,p,r)."""
+def _tilde_name(name):
+    """(name, tilde) of a name given in a tuple: 'g~', '\\tilde g', '\\widetilde{g}' -> ('g', True)"""
+    m = _TILDE_RE.match(name)
+    return (m.group(1) or m.group(2), True) if m else (name, False)
+
+
+def parse_tilde(term):
+    """term -> (names, [labels, ...], [tilde, ...]).  A string ('g_{vbms} S_{asnb} h_{na}', 'g_vbms ...',
+    'g[v,b,m,s] ...', '\\tilde g_{vbms}', 'g~_vbms') or a list of items: 'g_abcd' strings, 4- or
+    2-letter strings, or tuples (p,q,r,s) / (name,p,q,r,s) / (name,p,r), name 'g~' for g~."""
     if isinstance(term, str):
         fac = _factors(term)
         if not fac:
             raise ValueError("no integrals found in %r" % term)
-        return [n for n, _ in fac], [lab for _, lab in fac]
-    names, gs = [], []
-    for g in term:
-        if isinstance(g, str) and len(g) not in (2, 4):
-            fac = _factors(g)
-            if len(fac) != 1:
-                raise ValueError("cannot read integral %r" % g)
-            names.append(fac[0][0])
-            gs.append(fac[0][1])
-        else:
-            g = tuple(g)
-            if len(g) in (3, 5):
-                names.append(g[0])
-                gs.append(g[1:])
-            elif len(g) in (2, 4):
-                names.append("g" if len(g) == 4 else "h")
-                gs.append(g)
+        names, gs, tildes = (list(x) for x in zip(*fac))
+    else:
+        names, gs, tildes = [], [], []
+        for g in term:
+            if isinstance(g, str) and len(g) not in (2, 4):
+                fac = _factors(g)
+                if len(fac) != 1:
+                    raise ValueError("cannot read integral %r" % g)
+                n, lab, t = fac[0]
             else:
-                raise ValueError("an integral needs two or four labels, got %r" % (g,))
+                g = tuple(g)
+                if len(g) in (3, 5):
+                    (n, t), lab = _tilde_name(g[0]), g[1:]
+                elif len(g) in (2, 4):
+                    n, t, lab = ("g" if len(g) == 4 else "h"), False, g
+                else:
+                    raise ValueError("an integral needs two or four labels, got %r" % (g,))
+            names.append(n)
+            gs.append(tuple(lab))
+            tildes.append(t)
+    for n, g, t in zip(names, gs, tildes):
+        if t and len(g) != 4:
+            raise ValueError("only a two-body integral can be antisymmetrised: %s~_%s" % (n, "".join(g)))
+    return names, gs, tildes
+
+
+def parse_term(term):
+    """term -> (names, [labels, ...]) for a term without antisymmetrised integrals (see parse_tilde)"""
+    names, gs, tildes = parse_tilde(term)
+    if any(tildes):
+        raise ValueError(
+            "antisymmetrised integral in %r: gd.diagram() and gd.grid() expand it into its diagrams"
+            % (term,)
+        )
     return names, gs
+
+
+def has_tilde(term):
+    """whether a term (string or list of integrals) holds an antisymmetrised integral"""
+    return not isinstance(term, (Picture, Grid)) and any(parse_tilde(term)[2])
+
+
+def expand(term):
+    """the plain terms of a term with antisymmetrised integrals, g~_abcd = g_abcd - g_abdc: 2^n of them
+    for n tildes, each as (exchanged, [(name, labels...), ...]) with exchanged the indices of the
+    integrals written as g_abdc; the first (nothing exchanged) carries the sign of the whole term"""
+    names, gs, tildes = parse_tilde(term)
+    which = [k for k, t in enumerate(tildes) if t]
+    for k in which:
+        if gs[k][2] == gs[k][3]:
+            raise ValueError("%s~_%s = 0 (its last two labels are the same)" % (names[k], "".join(gs[k])))
+    out = []
+    for pick in itertools.product((0, 1), repeat=len(which)):
+        ex = [k for k, p in zip(which, pick) if p]
+        out.append(
+            (ex, [(n,) + (g[:2] + (g[3], g[2]) if k in ex else g) for k, (n, g) in enumerate(zip(names, gs))])
+        )
+    return out
 
 
 def _types(types=None, core=CORE, exc=EXC, val=VAL):
@@ -600,7 +649,7 @@ class Diagram(Picture):
         scale=None,
         font=None,
     ):
-        self.names, self.gs = parse_term(term)
+        self.names, self.gs = parse_term(term)  # g~ is expanded by diagram()
         self.scale = scale or Picture.scale
         self.font = font
         self.styles = dict(STYLES)
@@ -878,6 +927,25 @@ class Diagram(Picture):
     def equation(self, eps=None):
         """tex() as an Equation: typeset when it is the output of a Jupyter cell, str()/print() give the source"""
         return Equation(self.tex(eps))
+
+    def angular(self, **kw):
+        """the angular reduction (Q^k, W^k, 6j symbols; .tex(), .equation(), .ampsci()), see angularinator"""
+        import angularinator
+
+        return angularinator.angular(self, **kw)
+
+    def ampsci(self, name="term_reduced", **kw):
+        """C++ for ampsci evaluating the angular-reduced form (see angularinator)"""
+        import angularinator
+
+        inc = kw.pop("includes", True)
+        return angularinator.angular(self, **kw).ampsci(name, includes=inc)
+
+    def ampsci_fullmsum(self, name="term_fullmsum", **kw):
+        """C++ for ampsci evaluating the term by brute force over every m (see angularinator)"""
+        import angularinator
+
+        return angularinator.ampsci_fullmsum(self, name=name, **kw)
 
     # ------------------------------------------------------------------------------------------
     # layout: a row for every vertex end, minimising crossings (x = row, y = time; rotated when drawn)
@@ -1239,6 +1307,25 @@ class Grid:
             % " \\\\\n".join("&" + d.tex(eps) for d in self.diagrams)
         )
 
+    def angular(self, **kw):
+        """the angular reduction (Q^k, W^k, 6j symbols; .tex(), .equation(), .ampsci()), see angularinator"""
+        import angularinator
+
+        return angularinator.angular(self, **kw)
+
+    def ampsci(self, name="term_reduced", **kw):
+        """C++ for ampsci evaluating the angular-reduced form (see angularinator)"""
+        import angularinator
+
+        inc = kw.pop("includes", True)
+        return angularinator.angular(self, **kw).ampsci(name, includes=inc)
+
+    def ampsci_fullmsum(self, name="term_fullmsum", **kw):
+        """C++ for ampsci evaluating the sum of the terms by brute force over every m (see angularinator)"""
+        import angularinator
+
+        return angularinator.ampsci_fullmsum(self, name=name, **kw)
+
     def tikz(self, unit=1.0, standalone=False):
         """the grid as one tikzpicture (each diagram in a shifted scope), or a standalone document"""
         placed, W, H = self._place()
@@ -1281,7 +1368,7 @@ def several(term):
     return (
         isinstance(term, (list, tuple))
         and bool(term)
-        and all(isinstance(t, (str, Picture)) for t in term)
+        and all(isinstance(t, (str, Picture, Grid)) for t in term)
     )
 
 
@@ -1295,26 +1382,47 @@ def diagram(term: List[Union[str, Picture]], **kw) -> Grid: ...
 
 def diagram(term, **kw):
     """the diagram of one term (string or list of integrals), or, for a list of terms, a Grid of
-    them as grid() gives (ncols=, gap=); keywords: styles, pad, omega, labels, scale, font,
-    core/exc/val, types"""
+    them as grid() gives (ncols=, gap=); a term with antisymmetrised integrals g~ gives the Grid of
+    its diagrams (see expand); keywords: styles, pad, omega, labels, scale, font, core/exc/val, types"""
     if several(term):
         return grid(term, **kw)
-    kw.pop("ncols", None)
-    kw.pop("gap", None)
-    if isinstance(term, Diagram):
+    ncols, gap = kw.pop("ncols", 3), kw.pop("gap", 6.0)
+    if isinstance(term, (Diagram, Grid)):
         return term
+    if has_tilde(term):
+        return Grid(_expanded(term, **kw), ncols=ncols, scale=kw.get("scale"), gap=gap)
     return Diagram(term, **kw).layout()
+
+
+def _expanded(term, layout=True, **kw):
+    """the diagrams of a term with antisymmetrised integrals, checking that each exchange flips the sign"""
+    out = []
+    for ex, t in expand(term):
+        d = Diagram(t, **kw)
+        if layout:
+            d.layout()
+        d.denominators()  # sets d.sign
+        if out and d.sign != out[0].sign * (-1) ** len(ex):
+            vs = [x for x, _ in d.vins] + [x for x, _ in d.vouts]
+            why = " (two valence lines with the same letter: use different letters)" if len(vs) != len(set(
+                [x for x, _ in d.vins])) + len(set([x for x, _ in d.vouts])) else ""
+            raise ValueError(
+                "the exchange diagram %s does not have the opposite sign of %s%s"
+                % (d._term_str(), out[0]._term_str(), why)
+            )
+        out.append(d)
+    return out
 
 
 def grid(terms, ncols=3, scale=None, gap=6.0, **kw):
     """diagrams of several terms side by side (shown inline in Jupyter; .tex(), .equation(), .tikz(),
-    .save('x.svg'/'x.pdf'/'x.tikz'/'x.tex')); keywords as for diagram()"""
-    return Grid(
-        [diagram(t, scale=scale, **kw) for t in terms],
-        ncols=ncols,
-        scale=scale,
-        gap=gap,
-    )
+    .save('x.svg'/'x.pdf'/'x.tikz'/'x.tex')); a term with g~ gives all its diagrams; keywords as for
+    diagram()"""
+    out = []
+    for t in terms:
+        d = diagram(t, scale=scale, **kw)
+        out += d.diagrams if isinstance(d, Grid) else [d]
+    return Grid(out, ncols=ncols, scale=scale, gap=gap)
 
 
 # ----------------------------------------------------------------------------------------------
